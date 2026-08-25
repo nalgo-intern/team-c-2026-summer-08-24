@@ -1,28 +1,34 @@
+import os
 import pandas as pd
 import numpy as np
 import cv2
+import urllib
 from ultralytics import YOLO
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 class PoseEstimator:
-    def __init__(self, model_path='pose_landmarker_full.task'):
-        yolo_model: YOLO
+    def __init__(self, model_path='pose_landmarker_lite.task'):
+        
+        if not os.path.exists(model_path):
+            url = f"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
+            urllib.request.urlretrieve(url, model_path)
 
         self.frame_order = 0
         self.records = []
 
-        #Yoloの初期化
-        self.yolo_model = YOLO('yolov8n.pt')
-
         # MediaPipeの初期化
-        base_options = python.BaseOptions(model_asset_path=model_path)
+        base_options = python.BaseOptions(
+            model_asset_path=model_path,
+            delegate=python.BaseOptions.Delegate.GPU
+        )
         options = vision.PoseLandmarkerOptions(
             base_options=base_options,
-            running_mode=vision.RunningMode.IMAGE,
+            running_mode=vision.RunningMode.VIDEO,
             num_poses=1
         )
+        self.pose_landmarker = vision.PoseLandmarker.create_from_options(options)
 
         self.POSE_CONNECTIONS = [
             (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8),
@@ -31,39 +37,20 @@ class PoseEstimator:
             (11, 23), (12, 24), (23, 24), (23, 25), (24, 26), (25, 27), (26, 28),
             (27, 29), (28, 30), (29, 31), (30, 32), (27, 31), (28, 32)
         ]
-        self.pose_landmarker = vision.PoseLandmarker.create_from_options(options)
-        self.current_offset = (0,0)
-        self.current_bbox = None
+
         self.current_landmarks = None
 
 
     # YOLOでクロップしてmediapipeで推論、角度計算をする
-    def process_frame(self, frame):
+    def process_frame(self, frame, timestamp_ms):
         self.frame_order += 1
 
-        # YOLOによる人物の検出
-        res = self.yolo_model(frame, classes=[0], verbose=False)
-
-        if len(res[0].boxes) == 0:
-            return None
-
-        box = res[0].boxes[0]
-        x1, y1, x2, y2 = (int(x) for x in box.xyxy[0])
-        self.current_bbox = (x1, y1, x2, y2)
-        self.current_offset = (x1, y1)
-
-        cropped_frame = frame[y1:y2, x1:x2]
-
-        if cropped_frame.size == 0:
-            return None
-
-        img_rgb = cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2RGB)
+        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
 
-        results = self.pose_landmarker.detect(mp_image)
+        results = self.pose_landmarker.detect_for_video(mp_image, int(timestamp_ms))
 
-        if results.pose_landmarks and len(results.pose_landmarks) > 0:
-            self.current_landmarks = results.pose_landmarks[0]
+        self.current_landmarks = results.pose_landmarks[0] if results.pose_landmarks else None
 
         def pt(idx):
             if self.current_landmarks:
@@ -109,12 +96,25 @@ class PoseEstimator:
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return
+        
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        print(fps)
+        if fps == 0: fps = 30
+        frame_index = 0
 
         while cap.isOpened():
+            if frame_index % 5 != 0:
+                frame_index += 1
+                continue
             ret, frame = cap.read()
             if not ret:
                 break
-            self.process_frame(frame)
+
+            timestamp_ms = (frame_index / fps) * 1000
+
+            self.process_frame(frame, timestamp_ms)
+
+            print(timestamp_ms / 1000)
 
             # デバッグ用 ============================
             if show_video:
@@ -124,20 +124,17 @@ class PoseEstimator:
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
             # =======================================
-            
+        
+            frame_index += 1
         cap.release()
         if show_video:
             cv2.destroyAllWindows()
 
     # 骨格点を描画する
     def draw_landmarks(self, frame):
-        if self.current_bbox is not None:
-            x1, y1, x2, y2 = self.current_bbox
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
         if self.current_landmarks:
-            crop = frame[y1:y2, x1:x2].copy()
-            h, w, _ = crop.shape
+            h, w, _ = frame.shape
             
             # 0.0〜1.0の座標をピクセルに変換
             pts = [(int(l.x * w), int(l.y * h)) for l in self.current_landmarks]
@@ -145,13 +142,11 @@ class PoseEstimator:
             # 骨格の線を引く
             for a, b in self.POSE_CONNECTIONS:
                 if a < len(pts) and b < len(pts):
-                    cv2.line(crop, pts[a], pts[b], (255, 255, 255), 2)
+                    cv2.line(frame, pts[a], pts[b], (255, 255, 255), 2)
             
             # 関節の点を打つ
             for p in pts:
-                cv2.circle(crop, p, 4, (0, 255, 0), -1)
-                
-            frame[y1:y2, x1:x2] = crop
+                cv2.circle(frame, p, 4, (0, 255, 0), -1)
 
         return frame
 
