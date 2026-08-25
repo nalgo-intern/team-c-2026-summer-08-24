@@ -1,16 +1,37 @@
 import pandas as pd
 import numpy as np
+import cv2
+from ultralytics import YOLO
 
 class PoseEstimator:
     def __init__(self):
+        yolo_model: YOLO
         self.frame_order = 0
         self.records = []
+
+        self.yolo_model = YOLO('yolov8n.pt')
+        self.current_offset = (0,0)
+
+
 
     # YOLOでクロップしてmediapipeで推論、角度計算をする
     def process_frame(self, frame):
         self.frame_order += 1
+
+        # YOLOによる人物の検出
+        res = self.yolo_model(frame, classes=[0], verbose=False)
+
+        if len(res[0].boxes) == 0:
+            return None
+
+        box = res[0].boxes[0]
+        x1, y1, x2, y2 = (int(x) for x in box.xyxy[0])
+        self.current_offset = (x1, y1)
+
+        cropped_frame = frame[y1:y2, x1:x2]
+
         
-        dummy_angles = {
+        angles = {
             'frame_order': self.frame_order,
             'right_elbow_right_shoulder_right_hip': np.random.uniform(90, 180),
             'left_elbow_left_shoulder_left_hip': np.random.uniform(90, 180),
@@ -21,8 +42,23 @@ class PoseEstimator:
             'left_wrist_left_elbow_left_shoulder': np.random.uniform(90, 180),
         }
         
-        self.records.append(dummy_angles)
-        return dummy_angles
+        self.records.append(angles)
+        return angles
+
+
+    # 動画から全フレームを処理する
+    def process_video(self, video_path: str):
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return
+            
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            self.process_frame(frame)
+            
+        cap.release()
 
     # 骨格点を描画する
     def draw_landmarks(self, frame):
