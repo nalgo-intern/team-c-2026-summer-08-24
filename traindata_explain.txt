@@ -1,0 +1,37 @@
+========================================
+other系列数
+========================================
+push_up: 246
+squat: 104
+other目標: 246
+
+other用動画数: 286
+other候補系列数: 1425
+
+========================================
+データ作成完了
+========================================
+X shape: (596, 20, 7)
+y shape: (596,)
+
+クラス数
+class
+push_up    246
+other      246
+squat      104
+Name: count, dtype: int64
+
+otherの内訳
+source_class
+jumping_jack    88
+pull_up         85
+situp           73
+Name: count, dtype: int64
+
+保存先:
+C:\Users\池田一颯\internship\data
+
+保存ファイル:
+  X.npy
+  y.npy
+  metadata.csv
