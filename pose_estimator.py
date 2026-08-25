@@ -11,7 +11,7 @@ class PoseEstimator:
 
         self.yolo_model = YOLO('yolov8n.pt')
         self.current_offset = (0,0)
-
+        self.current_bbox = None
 
 
     # YOLOでクロップしてmediapipeで推論、角度計算をする
@@ -26,11 +26,11 @@ class PoseEstimator:
 
         box = res[0].boxes[0]
         x1, y1, x2, y2 = (int(x) for x in box.xyxy[0])
+        self.current_bbox = (x1, y1, x2, y2)
         self.current_offset = (x1, y1)
 
         cropped_frame = frame[y1:y2, x1:x2]
 
-        
         angles = {
             'frame_order': self.frame_order,
             'right_elbow_right_shoulder_right_hip': np.random.uniform(90, 180),
@@ -57,11 +57,22 @@ class PoseEstimator:
             if not ret:
                 break
             self.process_frame(frame)
+
+            frame = self.draw_landmarks(frame)
+            cv2.imshow("test", frame)
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
             
         cap.release()
+        cv2.destroyAllWindows()
 
     # 骨格点を描画する
     def draw_landmarks(self, frame):
+        if self.current_bbox is not None:
+            x1, y1, x2, y2 = self.current_bbox
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+
         return frame
 
     # pandasのデータフレームとして角度の情報を返す
