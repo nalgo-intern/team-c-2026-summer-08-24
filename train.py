@@ -61,7 +61,7 @@ METADATA_PATH = os.path.join(
 
 MODEL_DIR = r"models"
 
-MODEL_NAME = "lstm_model_v2.pth"
+MODEL_NAME = "lstm_model_v3.pth"
 
 MODEL_PATH = os.path.join(
     MODEL_DIR,
@@ -104,9 +104,9 @@ NUM_WORKERS = 0
 #
 # 毎回ランダムに0.7～1.3の値を生成する。
 
-SPEED_MIN = 0.9
+SPEED_MIN = 1
 
-SPEED_MAX = 1.1
+SPEED_MAX = 1
 
 
 # ============================================================
