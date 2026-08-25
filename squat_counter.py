@@ -1,30 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from collections.abc import Sequence
-from typing import TypeAlias
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+if TYPE_CHECKING:
+    from src.pose_estimator import PoseEstimator
 
-Point: TypeAlias = Sequence[float]
 
-
-def calculate_angle(point_a: Point, vertex: Point, point_c: Point) -> float:
-    """2次元または3次元の3点から、vertexを頂点とする角度を返す。"""
-    vector_a = np.asarray(point_a, dtype=float) - np.asarray(vertex, dtype=float)
-    vector_c = np.asarray(point_c, dtype=float) - np.asarray(vertex, dtype=float)
-
-    if vector_a.ndim != 1 or vector_c.ndim != 1 or vector_a.shape != vector_c.shape:
-        raise ValueError("3点は同じ次元の座標にしてください。")
-
-    length_product = float(np.linalg.norm(vector_a) * np.linalg.norm(vector_c))
-    if length_product == 0.0:
-        raise ValueError("同じ座標の点があり、角度を計算できません。")
-
-    cosine = float(np.dot(vector_a, vector_c) / length_product)
-    cosine = float(np.clip(cosine, -1.0, 1.0))
-    return float(np.degrees(np.arccos(cosine)))
+LEFT_KNEE_ANGLE = "left_hip_left_knee_left_ankle"
+RIGHT_KNEE_ANGLE = "right_hip_right_knee_right_ankle"
 
 
 @dataclass
@@ -70,9 +57,9 @@ class SquatCounter:
     def update(self, angle: float | None) -> str:
         """新しい膝角度を受け取り、現在の段階を返す。"""
         posture: str | None = None
-        if angle is not None and angle >= self.stand_angle:
+        if angle is not None and np.isfinite(angle) and angle >= self.stand_angle:
             posture = "UP"
-        elif angle is not None and angle <= self.squat_angle:
+        elif angle is not None and np.isfinite(angle) and 0.0 < angle <= self.squat_angle:
             posture = "DOWN"
 
         return self._update_posture(posture)
@@ -82,13 +69,38 @@ class SquatCounter:
     ) -> str:
         """左右両方の膝角度が条件を満たしたときだけ状態を変更する。"""
         posture: str | None = None
-        if left_angle is not None and right_angle is not None:
+        if (
+            left_angle is not None
+            and right_angle is not None
+            and np.isfinite(left_angle)
+            and np.isfinite(right_angle)
+            and left_angle > 0.0
+            and right_angle > 0.0
+        ):
             if min(left_angle, right_angle) >= self.stand_angle:
                 posture = "UP"
             elif max(left_angle, right_angle) <= self.squat_angle:
                 posture = "DOWN"
 
         return self._update_posture(posture)
+
+    def update_from_pose_angles(
+        self, angles: Mapping[str, float] | None
+    ) -> str:
+        """PoseEstimatorが返した角度情報から左右の膝角度を取得する。"""
+        if angles is None:
+            return self.update_bilateral(None, None)
+
+        return self.update_bilateral(
+            angles.get(LEFT_KNEE_ANGLE),
+            angles.get(RIGHT_KNEE_ANGLE),
+        )
+
+    def update_from_frame(
+        self, pose_estimator: PoseEstimator, frame: Any
+    ) -> str:
+        """PoseEstimatorでフレームを処理し、その計算結果で状態を更新する。"""
+        return self.update_from_pose_angles(pose_estimator.process_frame(frame))
 
     def _update_posture(self, posture: str | None) -> str:
         if posture is None:
