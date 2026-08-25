@@ -65,15 +65,39 @@ class PoseEstimator:
         if results.pose_landmarks and len(results.pose_landmarks) > 0:
             self.current_landmarks = results.pose_landmarks[0]
 
+        def pt(idx):
+            if self.current_landmarks:
+                return np.array([self.current_landmarks[idx].x, self.current_landmarks[idx].y])
+            return np.zeros(2)
+        
+        r_shoulder = pt(12)
+        l_shoulder = pt(11)
+
+        r_elbow    = pt(14)
+        l_elbow    = pt(13)
+        
+        r_hip      = pt(24)
+        l_hip      = pt(23)
+        m_hip      = (l_hip + r_hip) / 2.0
+
+        r_knee     = pt(26)
+        l_knee     = pt(25)
+
+        r_ankle    = pt(28)
+        l_ankle    = pt(27)
+
+        r_wrist    = pt(16)
+        l_wrist    = pt(15)
+
         angles = {
             'frame_order': self.frame_order,
-            'right_elbow_right_shoulder_right_hip': np.random.uniform(90, 180),
-            'left_elbow_left_shoulder_left_hip': np.random.uniform(90, 180),
-            'right_knee_mid_hip_left_knee': np.random.uniform(30, 90),
-            'right_hip_right_knee_right_ankle': np.random.uniform(90, 180),
-            'left_hip_left_knee_left_ankle': np.random.uniform(90, 180),
-            'right_wrist_right_elbow_right_shoulder': np.random.uniform(90, 180),
-            'left_wrist_left_elbow_left_shoulder': np.random.uniform(90, 180),
+            'right_elbow_right_shoulder_right_hip':     self.calculate_angle(r_elbow, r_shoulder, r_hip),
+            'left_elbow_left_shoulder_left_hip':        self.calculate_angle(l_elbow, l_shoulder, l_hip),
+            'right_knee_mid_hip_left_knee':             self.calculate_angle(r_knee, m_hip, l_knee),
+            'right_hip_right_knee_right_ankle':         self.calculate_angle(r_hip, r_knee, r_ankle),
+            'left_hip_left_knee_left_ankle':            self.calculate_angle(l_hip, l_knee, l_ankle),
+            'right_wrist_right_elbow_right_shoulder':   self.calculate_angle(r_wrist, r_elbow, r_shoulder),
+            'left_wrist_left_elbow_left_shoulder':      self.calculate_angle (l_wrist, l_elbow, l_shoulder),
         }
         
         self.records.append(angles)
@@ -81,7 +105,7 @@ class PoseEstimator:
 
 
     # 動画から全フレームを処理する
-    def process_video(self, video_path: str):
+    def process_video(self, video_path: str, show_video: bool = False):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return
@@ -93,15 +117,17 @@ class PoseEstimator:
             self.process_frame(frame)
 
             # デバッグ用 ============================
-            frame = self.draw_landmarks(frame)
-            cv2.imshow("test", frame)
+            if show_video:
+                frame = self.draw_landmarks(frame)
+                cv2.imshow("test", frame)
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
             # =======================================
             
         cap.release()
-        cv2.destroyAllWindows()
+        if show_video:
+            cv2.destroyAllWindows()
 
     # 骨格点を描画する
     def draw_landmarks(self, frame):
@@ -136,4 +162,13 @@ class PoseEstimator:
     # 角度を計算する
     @staticmethod
     def calculate_angle(a, b, c):
-        return 0.0
+        if np.all(a == 0.0) or np.all(b == 0.0) or np.all(c == 0.0):
+            return 0.0
+
+        v1 = a - b
+        v2 = c - b
+
+        cos_theta = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-6)
+
+        angle = np.degrees(np.arccos(np.clip(cos_theta, -1.0, 1.0)))
+        return float(angle)
