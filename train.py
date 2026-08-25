@@ -61,7 +61,7 @@ METADATA_PATH = os.path.join(
 
 MODEL_DIR = r"models"
 
-MODEL_NAME = "lstm_model_v3.pth"
+MODEL_NAME = "lstm_model_v7.pth"
 
 MODEL_PATH = os.path.join(
     MODEL_DIR,
