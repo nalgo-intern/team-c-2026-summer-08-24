@@ -119,12 +119,26 @@ class PoseEstimator:
             # デバッグ用 ============================
             if show_video:
                 frame = self.draw_landmarks(frame)
-                cv2.imshow("test", frame)
-
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-            # =======================================
-        
+            # ==========================================
+                if frame_index < len(self.records):
+                    record = self.records[frame_index]
+                    
+                    # 左右の膝の角度を取得 (取得できない場合は0.0にする)
+                    l_knee = record.get('left_hip_left_knee_left_ankle', 0.0)
+                    r_knee = record.get('right_hip_right_knee_right_ankle', 0.0)
+                    avg_knee = (l_knee + r_knee) / 2.0
+                    
+                    # OpenCVで画面の左上にテキストを描画 (黄色とピンク)
+                    cv2.putText(frame, f"L Knee: {l_knee:.1f}", (10, 40), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2, cv2.LINE_AA)
+                    cv2.putText(frame, f"R Knee: {r_knee:.1f}", (10, 80), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2, cv2.LINE_AA)
+                    cv2.putText(frame, f"Avg Knee: {avg_knee:.1f}", (10, 120), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 255), 2, cv2.LINE_AA)
+                # ==========================================
+                
+            out.write(frame)
+                
             frame_index += 1
         cap.release()
         if show_video:
