@@ -3,28 +3,31 @@ import pandas as pd
 import numpy as np
 import cv2
 import urllib
-from ultralytics import YOLO
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from moviepy import VideoFileClip
 
 
 class PoseEstimator:
-    def __init__(self, model_path=r"pose_landmarker_lite.task"):
 
-        # ============================================================
-        # Poseモデルがなければダウンロード
-        # ============================================================
+    def __init__(
+        self,
+        model_path=r"pose_landmarker_lite.task"
+    ):
+
         if not os.path.exists(model_path):
+
             url = (
                 "https://storage.googleapis.com/mediapipe-models/"
                 "pose_landmarker/pose_landmarker_lite/float16/latest/"
                 "pose_landmarker_lite.task"
             )
 
-            print("Poseモデルをダウンロードします...")
-            urllib.request.urlretrieve(url, model_path)
-            print("ダウンロード完了")
+            urllib.request.urlretrieve(
+                url,
+                model_path
+            )
 
         self.frame_order = 0
         self.records = []
@@ -33,6 +36,7 @@ class PoseEstimator:
         # MediaPipeの初期化
         # CPUを使用
         # ============================================================
+
         base_options = python.BaseOptions(
             model_asset_path=model_path,
             delegate=python.BaseOptions.Delegate.CPU
@@ -45,25 +49,60 @@ class PoseEstimator:
         )
 
         self.pose_landmarker = (
-            vision.PoseLandmarker.create_from_options(options)
+            vision.PoseLandmarker.create_from_options(
+                options
+            )
         )
 
         self.POSE_CONNECTIONS = [
-            (0, 1), (1, 2), (2, 3), (3, 7),
-            (0, 4), (4, 5), (5, 6), (6, 8),
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 7),
+
+            (0, 4),
+            (4, 5),
+            (5, 6),
+            (6, 8),
+
             (9, 10),
+
             (11, 12),
-            (11, 13), (13, 15), (15, 17), (15, 19), (15, 21),
+
+            (11, 13),
+            (13, 15),
+            (15, 17),
+            (15, 19),
+            (15, 21),
+
             (17, 19),
-            (12, 14), (14, 16), (16, 18), (16, 20), (16, 22),
+
+            (12, 14),
+            (14, 16),
+            (16, 18),
+            (16, 20),
+            (16, 22),
+
             (18, 20),
-            (11, 23), (12, 24),
+
+            (11, 23),
+            (12, 24),
             (23, 24),
-            (23, 25), (24, 26),
-            (25, 27), (26, 28),
-            (27, 29), (28, 30),
-            (29, 31), (30, 32),
-            (27, 31), (28, 32)
+
+            (23, 25),
+            (24, 26),
+
+            (25, 27),
+            (26, 28),
+
+            (27, 29),
+            (28, 30),
+
+            (29, 31),
+            (30, 32),
+
+            (27, 31),
+            (28, 32)
         ]
 
         self.current_landmarks = None
@@ -71,7 +110,12 @@ class PoseEstimator:
     # ============================================================
     # YOLOでクロップしてMediaPipeで推論、角度計算
     # ============================================================
-    def process_frame(self, frame, timestamp_ms):
+
+    def process_frame(
+        self,
+        frame,
+        timestamp_ms
+    ):
 
         self.frame_order += 1
 
@@ -85,9 +129,11 @@ class PoseEstimator:
             data=img_rgb
         )
 
-        results = self.pose_landmarker.detect_for_video(
-            mp_image,
-            int(timestamp_ms)
+        results = (
+            self.pose_landmarker.detect_for_video(
+                mp_image,
+                int(timestamp_ms)
+            )
         )
 
         self.current_landmarks = (
@@ -97,11 +143,15 @@ class PoseEstimator:
         )
 
         def pt(idx):
+
             if self.current_landmarks:
-                return np.array([
-                    self.current_landmarks[idx].x,
-                    self.current_landmarks[idx].y
-                ])
+
+                return np.array(
+                    [
+                        self.current_landmarks[idx].x,
+                        self.current_landmarks[idx].y
+                    ]
+                )
 
             return np.zeros(2)
 
@@ -114,7 +164,9 @@ class PoseEstimator:
         r_hip = pt(24)
         l_hip = pt(23)
 
-        m_hip = (l_hip + r_hip) / 2.0
+        m_hip = (
+            l_hip + r_hip
+        ) / 2.0
 
         r_knee = pt(26)
         l_knee = pt(25)
@@ -126,91 +178,97 @@ class PoseEstimator:
         l_wrist = pt(15)
 
         angles = {
-            'frame_order':
+
+            "frame_order":
                 self.frame_order,
 
-            'right_elbow_right_shoulder_right_hip':
+            "right_elbow_right_shoulder_right_hip":
                 self.calculate_angle(
                     r_elbow,
                     r_shoulder,
                     r_hip
                 ),
 
-            'left_elbow_left_shoulder_left_hip':
+            "left_elbow_left_shoulder_left_hip":
                 self.calculate_angle(
                     l_elbow,
                     l_shoulder,
                     l_hip
                 ),
 
-            'right_knee_mid_hip_left_knee':
+            "right_knee_mid_hip_left_knee":
                 self.calculate_angle(
                     r_knee,
                     m_hip,
                     l_knee
                 ),
 
-            'right_hip_right_knee_right_ankle':
+            "right_hip_right_knee_right_ankle":
                 self.calculate_angle(
                     r_hip,
                     r_knee,
                     r_ankle
                 ),
 
-            'left_hip_left_knee_left_ankle':
+            "left_hip_left_knee_left_ankle":
                 self.calculate_angle(
                     l_hip,
                     l_knee,
                     l_ankle
                 ),
 
-            'right_wrist_right_elbow_right_shoulder':
+            "right_wrist_right_elbow_right_shoulder":
                 self.calculate_angle(
                     r_wrist,
                     r_elbow,
                     r_shoulder
                 ),
 
-            'left_wrist_left_elbow_left_shoulder':
+            "left_wrist_left_elbow_left_shoulder":
                 self.calculate_angle(
                     l_wrist,
                     l_elbow,
                     l_shoulder
-                )
+                ),
         }
 
-        self.records.append(angles)
+        self.records.append(
+            angles
+        )
 
         return angles
 
     # ============================================================
-    # 動画から全フレームを処理
+    # 動画から全フレームを処理する
     # ============================================================
+
     def process_video(
         self,
-        video_path: str,
-        show_video: bool = False
+        video_path: str
     ):
 
-        cap = cv2.VideoCapture(video_path)
+        self.frame_order = 0
+        self.records = []
+
+        cap = cv2.VideoCapture(
+            video_path
+        )
 
         if not cap.isOpened():
-            return
+            return []
 
-        fps = cap.get(cv2.CAP_PROP_FPS)
-
-        print(fps)
+        fps = cap.get(
+            cv2.CAP_PROP_FPS
+        )
 
         if fps == 0:
             fps = 30
 
         frame_index = 0
 
-        while cap.isOpened():
+        video_landmarks = []
 
-            if frame_index % 5 != 0:
-                frame_index += 1
-                continue
+        while cap.isOpened():
 
             ret, frame = cap.read()
 
@@ -226,36 +284,148 @@ class PoseEstimator:
                 timestamp_ms
             )
 
-            print(
-                timestamp_ms / 1000
+            video_landmarks.append(
+                self.current_landmarks
             )
-
-            # デバッグ用
-            if show_video:
-
-                frame = self.draw_landmarks(
-                    frame
-                )
-
-                cv2.imshow(
-                    "test",
-                    frame
-                )
-
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
 
             frame_index += 1
 
         cap.release()
 
-        if show_video:
-            cv2.destroyAllWindows()
+        return video_landmarks
+
+    # ============================================================
+    # 動画に骨格を描画
+    # ============================================================
+
+    def render_video(
+        self,
+        input_video_path: str,
+        video_landmarks: list,
+        output_video_path: str = "output.mp4"
+    ):
+
+        cap = cv2.VideoCapture(
+            input_video_path
+        )
+
+        if not cap.isOpened():
+            return
+
+        width = int(
+            cap.get(
+                cv2.CAP_PROP_FRAME_WIDTH
+            )
+        )
+
+        height = int(
+            cap.get(
+                cv2.CAP_PROP_FRAME_HEIGHT
+            )
+        )
+
+        fps = cap.get(
+            cv2.CAP_PROP_FPS
+        )
+
+        if fps == 0:
+            fps = 30
+
+        temp_output = (
+            "temp_"
+            + os.path.basename(
+                output_video_path
+            )
+        )
+
+        fourcc = cv2.VideoWriter_fourcc(
+            *"mp4v"
+        )
+
+        out = cv2.VideoWriter(
+            temp_output,
+            fourcc,
+            fps,
+            (
+                width,
+                height
+            )
+        )
+
+        frame_index = 0
+
+        while cap.isOpened():
+
+            ret, frame = cap.read()
+
+            if not ret:
+                break
+
+            if (
+                frame_index
+                < len(video_landmarks)
+            ):
+
+                self.current_landmarks = (
+                    video_landmarks[
+                        frame_index
+                    ]
+                )
+
+                frame = (
+                    self.draw_landmarks(
+                        frame
+                    )
+                )
+
+            out.write(frame)
+
+            frame_index += 1
+
+        cap.release()
+        out.release()
+
+        try:
+
+            clip = VideoFileClip(
+                temp_output
+            )
+
+            clip.write_videofile(
+                output_video_path,
+                codec="libx264",
+                audio=False,
+                logger=None
+            )
+
+            clip.close()
+
+            if os.path.exists(
+                temp_output
+            ):
+
+                os.remove(
+                    temp_output
+                )
+
+        except Exception as e:
+
+            print(
+                f"動画の変換に失敗しました: {e}"
+            )
+
+            return temp_output
+
+        return output_video_path
 
     # ============================================================
     # 骨格点を描画
     # ============================================================
-    def draw_landmarks(self, frame):
+
+    def draw_landmarks(
+        self,
+        frame
+    ):
 
         if self.current_landmarks:
 
@@ -271,7 +441,10 @@ class PoseEstimator:
 
             for a, b in self.POSE_CONNECTIONS:
 
-                if a < len(pts) and b < len(pts):
+                if (
+                    a < len(pts)
+                    and b < len(pts)
+                ):
 
                     cv2.line(
                         frame,
@@ -294,8 +467,9 @@ class PoseEstimator:
         return frame
 
     # ============================================================
-    # pandasのDataFrameとして角度情報を返す
+    # pandasのデータフレームとして角度情報を返す
     # ============================================================
+
     def get_dataframe(self):
 
         return pd.DataFrame(
@@ -305,14 +479,20 @@ class PoseEstimator:
     # ============================================================
     # 角度を計算
     # ============================================================
+
     @staticmethod
-    def calculate_angle(a, b, c):
+    def calculate_angle(
+        a,
+        b,
+        c
+    ):
 
         if (
             np.all(a == 0.0)
             or np.all(b == 0.0)
             or np.all(c == 0.0)
         ):
+
             return 0.0
 
         v1 = a - b
@@ -323,7 +503,8 @@ class PoseEstimator:
             /
             (
                 np.linalg.norm(v1)
-                * np.linalg.norm(v2)
+                *
+                np.linalg.norm(v2)
                 + 1e-6
             )
         )
