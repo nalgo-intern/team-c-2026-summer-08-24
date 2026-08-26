@@ -18,35 +18,49 @@ class ExerciseDetector:
         1 = push_up
         2 = squat
 
-    使用方法:
+    ------------------------------------------------------------
+    動画処理
+    ------------------------------------------------------------
 
-        detector = ExerciseDetector(
-            model_path="models/lstm_binary_pushup_squat.pth",
-            pose_model_path="pose_landmarker_lite.task",
-            pushup_threshold=0.90,
-            squat_threshold=0.10,
+        results = detector.process_video(
+            video_path="input.mp4",
+            output_path="output.mp4"
         )
+
+    戻り値:
+        numpy.ndarray
+
+        [0, 0, 0, 1, 1, 1, 0, 2, 2, ...]
+
+    ------------------------------------------------------------
+    リアルタイム処理
+    ------------------------------------------------------------
 
         result = detector.process_frame(
             frame,
             timestamp_ms
         )
 
-    result:
-        0 = unknown
-        1 = push_up
-        2 = squat
+    戻り値:
+        0 / 1 / 2
+
+    ※ process_frame() は1フレーム処理するたびに
+       結果を返す。
+
+    ※ process_video() と process_frame() は
+       同じDetectorインスタンスで使用可能。
     """
 
     # ============================================================
     # 初期化
     # ============================================================
+
     def __init__(
         self,
         model_path,
         pose_model_path,
         pushup_threshold=0.90,
-        squat_threshold=0.10,
+        squat_threshold=0.80,
         required_consecutive=3,
         sequence_length=20,
     ):
@@ -54,6 +68,7 @@ class ExerciseDetector:
         # --------------------------------------------------------
         # パス
         # --------------------------------------------------------
+
         self.model_path = Path(model_path)
 
         self.pose_model_path = Path(
@@ -63,11 +78,10 @@ class ExerciseDetector:
         # --------------------------------------------------------
         # LSTM設定
         # --------------------------------------------------------
+
         self.input_size = 7
 
-        self.sequence_length = (
-            sequence_length
-        )
+        self.sequence_length = sequence_length
 
         self.hidden_size = 64
 
@@ -83,19 +97,17 @@ class ExerciseDetector:
         ]
 
         # --------------------------------------------------------
-        # クラスごとの信頼度閾値
+        # 信頼度閾値
         # --------------------------------------------------------
-        self.pushup_threshold = (
-            pushup_threshold
-        )
 
-        self.squat_threshold = (
-            squat_threshold
-        )
+        self.pushup_threshold = pushup_threshold
+
+        self.squat_threshold = squat_threshold
 
         # --------------------------------------------------------
         # 連続判定
         # --------------------------------------------------------
+
         self.required_consecutive = (
             required_consecutive
         )
@@ -103,6 +115,7 @@ class ExerciseDetector:
         # --------------------------------------------------------
         # 身体姿勢判定
         # --------------------------------------------------------
+
         self.lying_y_threshold = 0.15
 
         self.standing_y_threshold = 0.15
@@ -110,29 +123,36 @@ class ExerciseDetector:
         # --------------------------------------------------------
         # 特徴量
         # --------------------------------------------------------
+
         self.feature_columns = [
+
             "right_elbow_right_shoulder_right_hip",
+
             "left_elbow_left_shoulder_left_hip",
+
             "right_knee_mid_hip_left_knee",
+
             "right_hip_right_knee_right_ankle",
+
             "left_hip_left_knee_left_ankle",
+
             "right_wrist_right_elbow_right_shoulder",
+
             "left_wrist_left_elbow_left_shoulder"
+
         ]
 
         # --------------------------------------------------------
         # デバイス
         # --------------------------------------------------------
+
         self.device = torch.device(
             "cuda"
             if torch.cuda.is_available()
             else "cpu"
         )
 
-        print(
-            "Device:",
-            self.device
-        )
+        print("Device:", self.device)
 
         if torch.cuda.is_available():
 
@@ -144,6 +164,7 @@ class ExerciseDetector:
         # --------------------------------------------------------
         # LSTMモデル
         # --------------------------------------------------------
+
         self.model, self.class_names = (
             self.load_model()
         )
@@ -151,6 +172,7 @@ class ExerciseDetector:
         # --------------------------------------------------------
         # PoseEstimator
         # --------------------------------------------------------
+
         self.pose_estimator = PoseEstimator(
             model_path=str(
                 self.pose_model_path
@@ -162,31 +184,23 @@ class ExerciseDetector:
         )
 
         # ========================================================
-        # ★ リアルタイム推論用の状態
+        # リアルタイム推論用状態
         # ========================================================
 
-        # --------------------------------------------------------
-        # 20フレームバッファ
-        # --------------------------------------------------------
         self.sequence_buffer = deque(
             maxlen=self.sequence_length
         )
 
-        # --------------------------------------------------------
-        # 連続判定
-        # --------------------------------------------------------
         self.previous_prediction = None
 
         self.consecutive_count = 0
 
-        # --------------------------------------------------------
-        # 現在確定している運動
-        # --------------------------------------------------------
         self.current_exercise = "unknown"
 
     # ============================================================
     # LSTMモデル読み込み
     # ============================================================
+
     def load_model(self):
 
         print()
@@ -199,6 +213,10 @@ class ExerciseDetector:
         print(
             "========================================"
         )
+
+        # --------------------------------------------------------
+        # モデル存在確認
+        # --------------------------------------------------------
 
         if not self.model_path.is_file():
 
@@ -221,6 +239,7 @@ class ExerciseDetector:
         # --------------------------------------------------------
         # checkpoint
         # --------------------------------------------------------
+
         checkpoint = torch.load(
             self.model_path,
             map_location=self.device
@@ -229,6 +248,7 @@ class ExerciseDetector:
         # --------------------------------------------------------
         # 学習時設定
         # --------------------------------------------------------
+
         input_size = checkpoint.get(
             "input_size",
             self.input_size
@@ -260,8 +280,9 @@ class ExerciseDetector:
         )
 
         # --------------------------------------------------------
-        # モデル
+        # モデル作成
         # --------------------------------------------------------
+
         model = LSTMClassifier(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -271,15 +292,22 @@ class ExerciseDetector:
         )
 
         # --------------------------------------------------------
-        # 重み
+        # 重み読み込み
         # --------------------------------------------------------
+
         model.load_state_dict(
             checkpoint["model_state_dict"]
         )
 
-        model.to(
-            self.device
-        )
+        # --------------------------------------------------------
+        # デバイス
+        # --------------------------------------------------------
+
+        model.to(self.device)
+
+        # --------------------------------------------------------
+        # 推論モード
+        # --------------------------------------------------------
 
         model.eval()
 
@@ -328,6 +356,7 @@ class ExerciseDetector:
     #
     # 新しい動画・新しいカメラ入力を開始するときに使用
     # ============================================================
+
     def reset(self):
 
         self.sequence_buffer.clear()
@@ -341,6 +370,7 @@ class ExerciseDetector:
     # ============================================================
     # 角度データ → numpy
     # ============================================================
+
     def angles_to_array(
         self,
         angles
@@ -367,25 +397,36 @@ class ExerciseDetector:
     # ============================================================
     # LSTM推論
     # ============================================================
+
     def predict_sequence(
         self,
         sequence
     ):
+
+        # --------------------------------------------------------
+        # numpy
+        # (20, 7)
+        #
+        # ↓
+        #
+        # Tensor
+        # (1, 20, 7)
+        # --------------------------------------------------------
 
         x = torch.tensor(
             sequence,
             dtype=torch.float32
         ).unsqueeze(0)
 
-        x = x.to(
-            self.device
-        )
+        x = x.to(self.device)
+
+        # --------------------------------------------------------
+        # 推論
+        # --------------------------------------------------------
 
         with torch.no_grad():
 
-            outputs = self.model(
-                x
-            )
+            outputs = self.model(x)
 
             probabilities = torch.softmax(
                 outputs,
@@ -398,13 +439,9 @@ class ExerciseDetector:
                 )
             )
 
-        prediction = (
-            prediction.item()
-        )
+        prediction = prediction.item()
 
-        confidence = (
-            confidence.item()
-        )
+        confidence = confidence.item()
 
         probabilities = (
             probabilities[0]
@@ -421,15 +458,29 @@ class ExerciseDetector:
     # ============================================================
     # 身体姿勢判定
     # ============================================================
+
     def classify_body_position(self):
 
         landmarks = (
             self.pose_estimator.current_landmarks
         )
 
+        # --------------------------------------------------------
+        # 骨格が検出できない
+        # --------------------------------------------------------
+
         if landmarks is None:
 
             return "unknown"
+
+        # --------------------------------------------------------
+        # ランドマーク取得
+        #
+        # 左肩  = 11
+        # 右肩  = 12
+        # 左腰  = 23
+        # 右腰  = 24
+        # --------------------------------------------------------
 
         try:
 
@@ -445,15 +496,27 @@ class ExerciseDetector:
 
             return "unknown"
 
+        # --------------------------------------------------------
+        # 肩の中心
+        # --------------------------------------------------------
+
         shoulder_y = (
             left_shoulder.y
             + right_shoulder.y
         ) / 2.0
 
+        # --------------------------------------------------------
+        # 腰の中心
+        # --------------------------------------------------------
+
         hip_y = (
             left_hip.y
             + right_hip.y
         ) / 2.0
+
+        # --------------------------------------------------------
+        # 肩と腰の距離
+        # --------------------------------------------------------
 
         y_difference = abs(
             hip_y - shoulder_y
@@ -462,6 +525,7 @@ class ExerciseDetector:
         # --------------------------------------------------------
         # 寝転び
         # --------------------------------------------------------
+
         if (
             y_difference
             <
@@ -473,6 +537,7 @@ class ExerciseDetector:
         # --------------------------------------------------------
         # 立ち
         # --------------------------------------------------------
+
         if (
             shoulder_y < hip_y
             and
@@ -488,6 +553,7 @@ class ExerciseDetector:
     # ============================================================
     # 身体姿勢フィルタ
     # ============================================================
+
     def filter_prediction(
         self,
         predicted_class,
@@ -499,6 +565,7 @@ class ExerciseDetector:
         #
         # push_upを無効
         # --------------------------------------------------------
+
         if body_position == "standing":
 
             if predicted_class == "push_up":
@@ -512,6 +579,7 @@ class ExerciseDetector:
         #
         # squatを無効
         # --------------------------------------------------------
+
         if body_position == "lying":
 
             if predicted_class == "squat":
@@ -523,8 +591,9 @@ class ExerciseDetector:
         return "unknown"
 
     # ============================================================
-    # クラスごとの閾値
+    # クラスごとの信頼度閾値
     # ============================================================
+
     def get_confidence_threshold(
         self,
         predicted_class
@@ -541,19 +610,39 @@ class ExerciseDetector:
         return 1.0
 
     # ============================================================
-    # ★ 1フレーム処理
+    # 結果を0 / 1 / 2に変換
+    # ============================================================
+
+    def _get_result_code(self):
+
+        if self.current_exercise == "push_up":
+
+            return 1
+
+        if self.current_exercise == "squat":
+
+            return 2
+
+        return 0
+
+    # ============================================================
+    # ★ リアルタイム用
     #
-    # 外部からリアルタイムに呼び出すためのメソッド
+    # 1フレームだけ処理する
     #
     # 入力:
+    #
     #     frame
     #     timestamp_ms
     #
     # 戻り値:
+    #
     #     0 = unknown
     #     1 = push_up
     #     2 = squat
+    #
     # ============================================================
+
     def process_frame(
         self,
         frame,
@@ -561,8 +650,9 @@ class ExerciseDetector:
     ):
 
         # ========================================================
-        # MediaPipe Pose
+        # Pose推定
         # ========================================================
+
         angles = (
             self.pose_estimator.process_frame(
                 frame,
@@ -573,6 +663,7 @@ class ExerciseDetector:
         # ========================================================
         # 身体姿勢
         # ========================================================
+
         body_position = (
             self.classify_body_position()
         )
@@ -580,6 +671,7 @@ class ExerciseDetector:
         # ========================================================
         # 7特徴量
         # ========================================================
+
         feature = (
             self.angles_to_array(
                 angles
@@ -589,13 +681,17 @@ class ExerciseDetector:
         # ========================================================
         # バッファへ追加
         # ========================================================
+
         self.sequence_buffer.append(
             feature
         )
 
         # ========================================================
         # 20フレーム未満
+        #
+        # まだLSTMに入力できない
         # ========================================================
+
         if (
             len(self.sequence_buffer)
             <
@@ -605,8 +701,23 @@ class ExerciseDetector:
             return 0
 
         # ========================================================
+        # 身体姿勢がunknownならunknown
+        # ========================================================
+
+        if body_position == "unknown":
+
+            self.current_exercise = "unknown"
+
+            self.consecutive_count = 0
+
+            self.previous_prediction = None
+
+            return 0
+
+        # ========================================================
         # LSTM入力
         # ========================================================
+
         sequence = np.array(
             self.sequence_buffer,
             dtype=np.float32
@@ -615,6 +726,7 @@ class ExerciseDetector:
         # ========================================================
         # LSTM推論
         # ========================================================
+
         (
             prediction,
             confidence,
@@ -622,6 +734,10 @@ class ExerciseDetector:
         ) = self.predict_sequence(
             sequence
         )
+
+        # ========================================================
+        # クラス名
+        # ========================================================
 
         predicted_class = (
             self.class_names[
@@ -632,6 +748,7 @@ class ExerciseDetector:
         # ========================================================
         # クラス別閾値
         # ========================================================
+
         threshold = (
             self.get_confidence_threshold(
                 predicted_class
@@ -641,19 +758,19 @@ class ExerciseDetector:
         # ========================================================
         # 信頼度不足
         # ========================================================
+
         if confidence < threshold:
 
             self.consecutive_count = 0
 
-            self.previous_prediction = (
-                None
-            )
+            self.previous_prediction = None
 
             return self._get_result_code()
 
         # ========================================================
         # 身体姿勢フィルタ
         # ========================================================
+
         detected_class = (
             self.filter_prediction(
                 predicted_class,
@@ -662,57 +779,27 @@ class ExerciseDetector:
         )
 
         # ========================================================
-        # 無効
+        # unknown
         # ========================================================
+
         if detected_class == "unknown":
 
             self.consecutive_count = 0
 
-            self.previous_prediction = (
-                None
-            )
+            self.previous_prediction = None
 
             # ----------------------------------------------------
-            # 身体姿勢がunknownの場合は
             # 現在の運動も解除
             # ----------------------------------------------------
-            if body_position == "unknown":
 
-                self.current_exercise = (
-                    "unknown"
-                )
+            self.current_exercise = "unknown"
 
-            # ----------------------------------------------------
-            # 立ち状態でpush_up
-            # ----------------------------------------------------
-            if (
-                body_position == "standing"
-                and
-                self.current_exercise == "push_up"
-            ):
-
-                self.current_exercise = (
-                    "unknown"
-                )
-
-            # ----------------------------------------------------
-            # 寝転び状態でsquat
-            # ----------------------------------------------------
-            if (
-                body_position == "lying"
-                and
-                self.current_exercise == "squat"
-            ):
-
-                self.current_exercise = (
-                    "unknown"
-                )
-
-            return self._get_result_code()
+            return 0
 
         # ========================================================
         # 連続判定
         # ========================================================
+
         if (
             detected_class
             ==
@@ -732,6 +819,7 @@ class ExerciseDetector:
         # ========================================================
         # 一定回数連続したら確定
         # ========================================================
+
         if (
             self.consecutive_count
             >=
@@ -745,126 +833,46 @@ class ExerciseDetector:
         # ========================================================
         # 最終フィルタ
         # ========================================================
-        if (
-            body_position == "unknown"
-        ):
 
-            self.current_exercise = (
-                "unknown"
-            )
-
-            self.consecutive_count = 0
-
-            self.previous_prediction = (
-                None
-            )
-
-        # --------------------------------------------------------
-        # standing + push_up
-        # --------------------------------------------------------
         if (
             body_position == "standing"
             and
             self.current_exercise == "push_up"
         ):
 
-            self.current_exercise = (
-                "unknown"
-            )
+            self.current_exercise = "unknown"
 
-        # --------------------------------------------------------
-        # lying + squat
-        # --------------------------------------------------------
         if (
             body_position == "lying"
             and
             self.current_exercise == "squat"
         ):
 
-            self.current_exercise = (
-                "unknown"
-            )
+            self.current_exercise = "unknown"
 
         # ========================================================
-        # 0 / 1 / 2
+        # 0 / 1 / 2を返す
         # ========================================================
+
         return self._get_result_code()
 
     # ============================================================
-    # 結果を0 / 1 / 2に変換
-    # ============================================================
-    def _get_result_code(self):
-
-        if self.current_exercise == "push_up":
-
-            return 1
-
-        if self.current_exercise == "squat":
-
-            return 2
-
-        return 0
-
-    # ============================================================
-    # 表示サイズ
-    # ============================================================
-    def calculate_display_size(
-        self,
-        width,
-        height
-    ):
-
-        aspect_ratio = (
-            width / height
-        )
-
-        if (
-            width <= 1280
-            and
-            height <= 720
-        ):
-
-            return (
-                width,
-                height
-            )
-
-        if aspect_ratio >= 1:
-
-            display_width = 1280
-
-            display_height = int(
-                display_width
-                / aspect_ratio
-            )
-
-        else:
-
-            display_height = 720
-
-            display_width = int(
-                display_height
-                * aspect_ratio
-            )
-
-        return (
-            display_width,
-            display_height
-        )
-
-    # ============================================================
-    # ★ 動画処理
+    # 動画処理
     #
-    # 動画表示はしない
+    # ★ 動画は表示しない
     #
-    # 結果動画だけ保存する
+    # ★ 結果動画は保存する
+    #
+    # ★ 最後に全フレームの結果を配列で返す
     #
     # 戻り値:
     #
     #     numpy.ndarray
     #
-    #     [0, 0, 1, 1, 1, 0, 2, 2, ...]
+    #     [0, 0, 0, 1, 1, 1, 0, 2, 2, ...]
+    #
     # ============================================================
+
     def process_video(
         self,
         video_path,
@@ -885,13 +893,26 @@ class ExerciseDetector:
         )
 
         # ========================================================
+        # ファイル確認
+        # ========================================================
+
+        if not video_path.is_file():
+
+            raise FileNotFoundError(
+                f"動画が見つかりません:\n"
+                f"{video_path}"
+            )
+
+        # ========================================================
         # 新しい動画なので状態リセット
         # ========================================================
+
         self.reset()
 
         # ========================================================
         # 動画
         # ========================================================
+
         cap = cv2.VideoCapture(
             str(video_path)
         )
@@ -906,6 +927,7 @@ class ExerciseDetector:
         # ========================================================
         # 動画情報
         # ========================================================
+
         fps = cap.get(
             cv2.CAP_PROP_FPS
         )
@@ -959,6 +981,7 @@ class ExerciseDetector:
         # ========================================================
         # 出力動画
         # ========================================================
+
         fourcc = cv2.VideoWriter_fourcc(
             *"mp4v"
         )
@@ -985,11 +1008,13 @@ class ExerciseDetector:
         # ========================================================
         # フレームごとの結果
         # ========================================================
+
         results = []
 
         # ========================================================
-        # フレーム
+        # フレーム処理
         # ========================================================
+
         frame_index = 0
 
         while True:
@@ -1003,6 +1028,7 @@ class ExerciseDetector:
             # ====================================================
             # timestamp
             # ====================================================
+
             timestamp_ms = (
                 frame_index
                 / fps
@@ -1010,25 +1036,31 @@ class ExerciseDetector:
             )
 
             # ====================================================
-            # ★ 1フレーム処理
+            # ★ process_frameを使用
+            #
+            # 1フレーム → 0 / 1 / 2
             # ====================================================
+
             result = self.process_frame(
                 frame,
                 timestamp_ms
             )
 
             # ====================================================
-            # ★ 結果保存
+            # 結果保存
             # ====================================================
+
             results.append(
                 result
             )
 
             # ====================================================
-            # 動画保存用表示
+            # 結果動画用の文字
             #
-            # 画面には表示しない
+            # ※画面には表示しない
+            # ※動画ファイルには描画して保存する
             # ====================================================
+
             if result == 1:
 
                 text = "push_up"
@@ -1052,8 +1084,9 @@ class ExerciseDetector:
             )
 
             # ====================================================
-            # Pose骨格
+            # Pose骨格描画
             # ====================================================
+
             frame = (
                 self.pose_estimator.draw_landmarks(
                     frame
@@ -1063,6 +1096,7 @@ class ExerciseDetector:
             # ====================================================
             # 結果動画保存
             # ====================================================
+
             writer.write(
                 frame
             )
@@ -1070,8 +1104,9 @@ class ExerciseDetector:
             frame_index += 1
 
         # ========================================================
-        # 終了
+        # 終了処理
         # ========================================================
+
         cap.release()
 
         writer.release()
@@ -1079,6 +1114,7 @@ class ExerciseDetector:
         # ========================================================
         # numpy配列
         # ========================================================
+
         results = np.array(
             results,
             dtype=np.int64
@@ -1111,5 +1147,9 @@ class ExerciseDetector:
         print(
             "========================================"
         )
+
+        # ========================================================
+        # 全フレーム結果を返す
+        # ========================================================
 
         return results
