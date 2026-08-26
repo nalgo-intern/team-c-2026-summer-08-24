@@ -20,7 +20,7 @@ sys.path.insert(0, str(BASE_DIR))
 # 他ファイルからクラスを読み込み
 # ============================================================
 
-from pose_estimator import PoseEstimator
+from pose_estimator_cpu import PoseEstimator
 from lstm_model import LSTMClassifier
 
 
@@ -29,7 +29,7 @@ from lstm_model import LSTMClassifier
 # ============================================================
 
 VIDEO_PATH = Path(
-    r"C:\Users\池田一颯\internship\video\YTDown.com_YouTube_Media_i-2RWGuSyN0_002_720p.mp4"
+    r"C:\Users\池田一颯\internship\video\input.mp4"
 )
 
 
