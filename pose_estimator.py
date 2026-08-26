@@ -123,7 +123,7 @@ class PoseEstimator:
         
         return video_landmarks
 
-    def render_video(self, input_video_path: str, video_landmarks: list, frame_counts: list, output_video_path: str = "output.mp4"):
+    def render_video(self, input_video_path: str, video_landmarks: list, frame_counts: list, frame_evals: list, output_video_path: str = "output.mp4"):
         cap = cv2.VideoCapture(input_video_path)
         if not cap.isOpened():
             return
@@ -149,8 +149,7 @@ class PoseEstimator:
                 self.current_landmarks = video_landmarks[frame_index]
                 frame = self.draw_landmarks(frame)
                 
-                # ===== 変更箇所: テキストの描画処理を追加 =====
-                # そのフレームの記録と回数を取得
+                # ===== テキストの描画処理 =====
                 record = self.records[frame_index]
                 count = frame_counts[frame_index]
                 
@@ -158,11 +157,18 @@ class PoseEstimator:
                 l_knee_angle = record.get('left_hip_left_knee_left_ankle', 0.0)
                 r_knee_angle = record.get('right_hip_right_knee_right_ankle', 0.0)
                 
-                # 動画の左上にテキストを描画
-                # cv2.putText(画像, テキスト, 位置(x,y), フォント, サイズ, 色(B,G,R), 太さ)
+                # --- 動画の左上にテキストを描画 ---
                 cv2.putText(frame, f"Count: {count}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
                 cv2.putText(frame, f"L-Knee: {l_knee_angle:.1f}", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
                 cv2.putText(frame, f"R-Knee: {r_knee_angle:.1f}", (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+                
+                # --- 追加箇所: 評価指標値の描画 ---
+                if frame_index < len(frame_evals) and frame_evals[frame_index] is not None:
+                    eval_data = frame_evals[frame_index]
+                    eval_angle = eval_data.get("knee_angle", 0.0)
+                    
+                    # 判定に使っている角度を描画（色は赤など目立つ色に）
+                    cv2.putText(frame, f"Eval Angle: {eval_angle:.1f}", (20, 170), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
                 # ===============================================
 
             out.write(frame)
@@ -174,22 +180,18 @@ class PoseEstimator:
         
         # --- ここから moviepy で H.264 に変換 ---
         try:
-            # mp4vの動画を読み込み、H.264 (libx264) で書き出し
             clip = VideoFileClip(temp_output)
             clip.write_videofile(output_video_path, codec="libx264", audio=False, logger=None)
             clip.close()
             
-            # 変換元の一時ファイルを削除
             if os.path.exists(temp_output):
                 os.remove(temp_output)
                 
         except Exception as e:
             print(f"動画の変換に失敗しました: {e}")
-            return temp_output  # 失敗した場合はとりあえずmp4v版を返す
+            return temp_output  
         
-        # 最終的なH.264の動画パスを返す
         return output_video_path
-
     # 骨格点を描画する
     def draw_landmarks(self, frame):
 
