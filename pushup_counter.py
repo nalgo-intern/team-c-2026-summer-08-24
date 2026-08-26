@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 if TYPE_CHECKING:
-    from src.pose_estimator import PoseEstimator
+    from pose_estimator import PoseEstimator
 
 
-LEFT_KNEE_ANGLE = "left_hip_left_knee_left_ankle"
-RIGHT_KNEE_ANGLE = "right_hip_right_knee_right_ankle"
+LEFT_ELBOW_ANGLE = "left_wrist_left_elbow_left_shoulder"
+RIGHT_ELBOW_ANGLE = "right_wrist_right_elbow_right_shoulder"
 
 
 @dataclass
@@ -37,11 +37,11 @@ class ExponentialMovingAverage:
 
 
 @dataclass
-class SquatCounter:
-    """膝角度が UP -> DOWN -> UP と変化したときに1回加算する。"""
+class PushupCounter:
+    """両肘が UP -> DOWN -> UP と変化したときに1回加算する。"""
 
-    stand_angle: float = 130.0
-    squat_angle: float = 120.0
+    extended_angle: float = 150.0
+    bent_angle: float = 90.0
     stable_frames: int = 3
     count: int = field(default=0, init=False)
     stage: str = field(default="WAITING", init=False)
@@ -49,17 +49,17 @@ class SquatCounter:
     _candidate_frames: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if not 0.0 < self.squat_angle < self.stand_angle < 180.0:
-            raise ValueError("0 < squat_angle < stand_angle < 180 にしてください。")
+        if not 0.0 < self.bent_angle < self.extended_angle < 180.0:
+            raise ValueError("0 < bent_angle < extended_angle < 180 にしてください。")
         if self.stable_frames < 1:
             raise ValueError("stable_framesは1以上にしてください。")
 
     def update(self, angle: float | None) -> str:
-        """新しい膝角度を受け取り、現在の段階を返す。"""
+        """新しい肘角度を受け取り、現在の段階を返す。"""
         posture: str | None = None
-        if angle is not None and np.isfinite(angle) and angle >= self.stand_angle:
+        if angle is not None and np.isfinite(angle) and angle >= self.extended_angle:
             posture = "UP"
-        elif angle is not None and np.isfinite(angle) and 0.0 < angle <= self.squat_angle:
+        elif angle is not None and np.isfinite(angle) and 0.0 < angle <= self.bent_angle:
             posture = "DOWN"
 
         return self._update_posture(posture)
@@ -67,7 +67,7 @@ class SquatCounter:
     def update_bilateral(
         self, left_angle: float | None, right_angle: float | None
     ) -> str:
-        """左右両方の膝角度が条件を満たしたときだけ状態を変更する。"""
+        """左右両方の肘角度が条件を満たしたときだけ状態を変更する。"""
         posture: str | None = None
         if (
             left_angle is not None
@@ -77,9 +77,9 @@ class SquatCounter:
             and left_angle > 0.0
             and right_angle > 0.0
         ):
-            if min(left_angle, right_angle) >= self.stand_angle:
+            if min(left_angle, right_angle) >= self.extended_angle:
                 posture = "UP"
-            elif max(left_angle, right_angle) <= self.squat_angle:
+            elif max(left_angle, right_angle) <= self.bent_angle:
                 posture = "DOWN"
 
         return self._update_posture(posture)
@@ -87,20 +87,24 @@ class SquatCounter:
     def update_from_pose_angles(
         self, angles: Mapping[str, float] | None
     ) -> str:
-        """PoseEstimatorが返した角度情報から左右の膝角度を取得する。"""
+        """PoseEstimatorが返した角度情報から左右の肘角度を取得する。"""
         if angles is None:
             return self.update_bilateral(None, None)
 
         return self.update_bilateral(
-            angles.get(LEFT_KNEE_ANGLE),
-            angles.get(RIGHT_KNEE_ANGLE),
+            angles.get(LEFT_ELBOW_ANGLE),
+            angles.get(RIGHT_ELBOW_ANGLE),
         )
 
     def update_from_frame(
-        self, pose_estimator: PoseEstimator, frame: Any
+        self,
+        pose_estimator: PoseEstimator,
+        frame: Any,
+        timestamp_ms: float,
     ) -> str:
         """PoseEstimatorでフレームを処理し、その計算結果で状態を更新する。"""
-        return self.update_from_pose_angles(pose_estimator.process_frame(frame))
+        angles = pose_estimator.process_frame(frame, timestamp_ms)
+        return self.update_from_pose_angles(angles)
 
     def _update_posture(self, posture: str | None) -> str:
         if posture is None:
