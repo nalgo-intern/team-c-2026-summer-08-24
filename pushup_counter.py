@@ -131,11 +131,6 @@ class PushupCounter:
 
         return self.stage
 
-    def reset_cycle(self) -> None:
-        """回数を保持したまま、途中の上下状態だけを初期化する。"""
-        self.stage = "WAITING"
-        self._clear_candidate()
-
     def _clear_candidate(self) -> None:
         self._candidate = None
         self._candidate_frames = 0
