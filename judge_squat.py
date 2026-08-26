@@ -33,9 +33,9 @@ class SquatEvaluator:
         if knee_angle < self.min_knee_angle:
             self.min_knee_angle = knee_angle
 
-        if 90 < knee_angle < 140:
+        if 100 < knee_angle < 140:
             self._append_log(
-                "しゃがみが浅いです（膝を90度以下まで曲げましょう）",
+                "しゃがみが浅いです（膝を100度以下まで曲げましょう）",
                 current_second,
             )
 
@@ -43,7 +43,7 @@ class SquatEvaluator:
 
     def get_result(self) -> dict:
         """全フレーム処理後に呼び出し、最終的な判定結果を取得する"""
-        if self.min_knee_angle <= 90:
+        if self.min_knee_angle <= 100:
             summary = "GOOD: 十分な深さまでしゃがめています"
         else:
             summary = "WARN: 全体的にしゃがみが浅い傾向があります"
