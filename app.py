@@ -1,8 +1,10 @@
 import os
 
 import streamlit as st
-from pose_estimator import PoseEstimator
 import tempfile
+
+from pose_estimator import PoseEstimator
+from squat_counter import SquatCounter
 
 
 # ==========================================
@@ -25,20 +27,33 @@ class VideoProcessor:
         # 2. 推論を実行して骨格情報(ランドマーク)を取得
         landmarks_data = self.estimator.process_video(input_temp.name)
 
-        # 3. 描画済み動画を保存するための一時ファイルを作成
+        # ===== 変更箇所: 動画をレンダリングする前に回数をカウントする =====
+        # 3. 角度データの取得
+        df_angles = self.estimator.get_dataframe()
+
+        counter = SquatCounter()
+        frame_counts = [] # 各フレームのカウント数を保存するリスト
+
+        for record in self.estimator.records:
+            counter.update_from_pose_angles(record)
+            frame_counts.append(counter.count) # そのフレーム時点での回数を保存
+
+        squat_count = counter.count
+        # =========================================================
+
+        # 4. 描画済み動画を保存するための一時ファイルを作成
         output_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         output_temp.close()
 
-        # 4. 取得したランドマークを使って、描画済みの動画を生成
-        out_path = self.estimator.render_video(input_temp.name, landmarks_data, output_temp.name)
+        # 5. 取得したランドマークと回数リストを使って、描画済みの動画を生成
+        # render_video に frame_counts を渡すように変更
+        out_path = self.estimator.render_video(input_temp.name, landmarks_data, frame_counts, output_temp.name)
 
-        # 5. 角度データの取得
-        df_angles = self.estimator.get_dataframe()
 
         # ※ 使い終わった入力用の一時ファイルは削除してもOK
         os.remove(input_temp.name)
 
-        return out_path, df_angles
+        return out_path, df_angles, squat_count
 
 
 # ==========================================
@@ -51,6 +66,8 @@ class SessionManager:
             st.session_state.processed_video_path = None
         if "processed_df" not in st.session_state:
             st.session_state.processed_df = None
+        if "train_count" not in st.session_state:
+            st.session_state.train_count = None
 
     @staticmethod
     def get(key: str):
@@ -80,18 +97,24 @@ class MainPageView:
             if st.button("解析実行"):
                 with st.spinner("解析中"):
                     # Logic層に処理を依頼
-                    out_vid, out_df = self.processor.process_and_render(uploaded_video)
+                    out_vid, out_df, out_count = self.processor.process_and_render(uploaded_video)
                     
                     # State層に保存
                     SessionManager.set("processed_video_path", out_vid)
                     SessionManager.set("processed_df", out_df)
+                    SessionManager.set("train_count", out_count)
 
         # 処理結果があれば表示
         processed_vid = SessionManager.get("processed_video_path")
         processed_df = SessionManager.get("processed_df")
+        processed_count = SessionManager.get("train_count")
 
         if processed_vid and processed_df is not None:
             st.success("解析が完了")
+
+            if processed_count is not None:
+                st.metric(label="回数: ", value=f"{processed_count}回")
+                st.divider()
             
             # カラムを分けて動画とデータを表示
             col1, col2 = st.columns([1, 1])

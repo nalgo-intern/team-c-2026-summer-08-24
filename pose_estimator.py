@@ -123,7 +123,7 @@ class PoseEstimator:
         
         return video_landmarks
 
-    def render_video(self, input_video_path: str, video_landmarks: list, output_video_path: str = "output.mp4"):
+    def render_video(self, input_video_path: str, video_landmarks: list, frame_counts: list, output_video_path: str = "output.mp4"):
         cap = cv2.VideoCapture(input_video_path)
         if not cap.isOpened():
             return
@@ -149,6 +149,22 @@ class PoseEstimator:
                 self.current_landmarks = video_landmarks[frame_index]
                 frame = self.draw_landmarks(frame)
                 
+                # ===== 変更箇所: テキストの描画処理を追加 =====
+                # そのフレームの記録と回数を取得
+                record = self.records[frame_index]
+                count = frame_counts[frame_index]
+                
+                # 膝の角度を取得 (取得できない場合は0.0にする)
+                l_knee_angle = record.get('left_hip_left_knee_left_ankle', 0.0)
+                r_knee_angle = record.get('right_hip_right_knee_right_ankle', 0.0)
+                
+                # 動画の左上にテキストを描画
+                # cv2.putText(画像, テキスト, 位置(x,y), フォント, サイズ, 色(B,G,R), 太さ)
+                cv2.putText(frame, f"Count: {count}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+                cv2.putText(frame, f"L-Knee: {l_knee_angle:.1f}", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+                cv2.putText(frame, f"R-Knee: {r_knee_angle:.1f}", (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+                # ===============================================
+
             out.write(frame)
                 
             frame_index += 1
