@@ -1,7 +1,10 @@
 import os
-
-import streamlit as st
 import tempfile
+import time
+import cv2
+import streamlit as st
+import av
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
 from pose_estimator import PoseEstimator
 from squat_counter import SquatCounter
@@ -15,31 +18,25 @@ class VideoProcessor:
         self.estimator = PoseEstimator()
 
     def process_and_render(self, uploaded_file):
-        """アップロードされた動画から骨格情報を取得し、動画を生成して返す"""
         if uploaded_file is None:
             return None, None
 
-        # 1. アップロードされた動画を一時ファイルとしてディスクに保存 (OpenCVで読むため)
         input_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         input_temp.write(uploaded_file.read())
         input_temp.close()
 
-        # 2. 推論を実行して骨格情報(ランドマーク)を取得
         landmarks_data = self.estimator.process_video(input_temp.name)
-
-        # 3. 角度データの取得
         df_angles = self.estimator.get_dataframe()
 
         counter = SquatCounter()
-        frame_counts = [] # 各フレームのカウント数を保存するリスト
+        frame_counts = []
 
         for record in self.estimator.records:
             counter.update_from_pose_angles(record)
-            frame_counts.append(counter.count) # そのフレーム時点での回数を保存
+            frame_counts.append(counter.count)
 
         squat_count = counter.count
 
-        # スクワットの評価
         evaluate = SquatEvaluator()
         frame_val = [] 
         fps = 30.0
@@ -49,15 +46,11 @@ class VideoProcessor:
             val = evaluate.judge_frame(current_second, landmark)
             frame_val.append(val)
         
-        # 最終的な判定結果を取得
         eval_result = evaluate.get_result()
 
-        # 4. 描画済み動画を保存するための一時ファイルを作成
         output_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         output_temp.close()
 
-        # 5. 取得したランドマークと回数リストを使って、描画済みの動画を生成
-        # render_video に frame_counts を渡すように変更
         out_path = self.estimator.render_video(
             input_temp.name, 
             landmarks_data, 
@@ -66,11 +59,73 @@ class VideoProcessor:
             output_temp.name
         )
 
-
-        # ※ 使い終わった入力用の一時ファイルは削除してもOK
         os.remove(input_temp.name)
 
         return out_path, df_angles, squat_count, eval_result
+
+
+# ==========================================
+# WebRTC用の映像処理クラス
+# ==========================================
+class SquatVideoProcessor:
+    """WebRTCで取得したフレームを1枚ずつ処理するクラス"""
+    def __init__(self):
+        # 毎フレーム処理するためのインスタンスを初期化
+        self.rt_estimator = PoseEstimator()
+        self.rt_evaluator = SquatEvaluator()
+        self.rt_counter = SquatCounter()
+        self.start_time = time.time()
+        
+        # UIに渡すためのステータスを保持
+        self.current_count = 0
+        self.current_stage = "WAITING"
+        self.feedback_msg = None
+
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+        # WebRTCから渡されたフレームをOpenCV形式(BGR)に変換
+        img = frame.to_ndarray(format="bgr24")
+        
+        # 鏡のように表示するために左右反転
+        img = cv2.flip(img, 1)
+
+        current_time = time.time()
+        elapsed_seconds = current_time - self.start_time
+        timestamp_ms = int(elapsed_seconds * 1000)
+
+        # 1. 骨格推定と角度計算[cite: 2]
+        angles = self.rt_estimator.process_frame(img, timestamp_ms)
+
+        # 2. フォーム判定[cite: 1]
+        eval_result = None
+        if self.rt_estimator.current_landmarks:
+            eval_result = self.rt_evaluator.judge_frame(elapsed_seconds, self.rt_estimator.current_landmarks)
+            
+            if self.rt_evaluator.feedback_logs:
+                latest_log = self.rt_evaluator.feedback_logs[-1]
+                if elapsed_seconds - latest_log["time"] < 3.0:
+                    self.feedback_msg = latest_log["message"]
+
+        # 3. カウント更新[cite: 3]
+        self.current_stage = self.rt_counter.update_from_pose_angles(angles)
+        self.current_count = self.rt_counter.count
+
+        # 4. 骨格の描画[cite: 2]
+        annotated_frame = self.rt_estimator.draw_landmarks(img.copy())
+
+        # 5. テキストの描画 (動画のrender_videoと同様の処理)[cite: 2]
+        l_knee_angle = angles.get('left_hip_left_knee_left_ankle', 0.0) if angles else 0.0
+        r_knee_angle = angles.get('right_hip_right_knee_right_ankle', 0.0) if angles else 0.0
+        
+        cv2.putText(annotated_frame, f"Count: {self.current_count}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+        cv2.putText(annotated_frame, f"L-Knee: {l_knee_angle:.1f}", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+        cv2.putText(annotated_frame, f"R-Knee: {r_knee_angle:.1f}", (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+        
+        if eval_result and "knee_angle" in eval_result:
+            eval_angle = eval_result["knee_angle"]
+            cv2.putText(annotated_frame, f"Eval Angle: {eval_angle:.1f}", (20, 170), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+
+        # 処理済みの画像をWebRTC側に返す
+        return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
 
 
 # ==========================================
@@ -85,7 +140,6 @@ class SessionManager:
             st.session_state.processed_df = None
         if "train_count" not in st.session_state:
             st.session_state.train_count = None
-        # 評価結果用のステートを追加
         if "eval_result" not in st.session_state:
             st.session_state.eval_result = None
 
@@ -97,6 +151,7 @@ class SessionManager:
     def set(key: str, value):
         st.session_state[key] = value
 
+
 # ==========================================
 # 3. View層（画面の描画）
 # ==========================================
@@ -106,7 +161,16 @@ class MainPageView:
 
     def render(self):
         st.title("筋トレアプリ")
+        
+        tab1, tab2 = st.tabs(["動画", "カメラ"])
+        
+        with tab1:
+            self._render_upload_tab()
+            
+        with tab2:
+            self._render_realtime_tab()
 
+    def _render_upload_tab(self):
         uploaded_video = st.file_uploader("動画ファイルをアップロードしてください", type=["mp4", "mov", "avi"])
 
         if uploaded_video is not None:
@@ -115,7 +179,6 @@ class MainPageView:
 
             if st.button("解析実行"):
                 with st.spinner("解析中"):
-                    # 戻り値を4つ受け取る
                     out_vid, out_df, out_count, out_eval = self.processor.process_and_render(uploaded_video)
                     
                     SessionManager.set("processed_video_path", out_vid)
@@ -131,20 +194,17 @@ class MainPageView:
         if processed_vid and processed_df is not None:
             st.success("解析が完了")
 
-            # 評価サマリーと回数を並べて表示
             col_met1, col_met2 = st.columns(2)
             if processed_count is not None:
                 col_met1.metric(label="回数: ", value=f"{processed_count}回")
             if processed_eval is not None:
                 col_met2.metric(label="最小膝角度: ", value=f"{processed_eval['min_knee_angle']:.1f}°")
                 
-                # サマリーメッセージをハイライト表示
                 if "GOOD" in processed_eval["summary"]:
                     st.info(processed_eval["summary"])
                 else:
                     st.warning(processed_eval["summary"])
                 
-                # タイムスタンプごとのフィードバックがある場合は折りたたみで表示
                 if processed_eval["feedback_logs"]:
                     with st.expander("フィードバックログの詳細を見る"):
                         for log in processed_eval["feedback_logs"]:
@@ -171,6 +231,43 @@ class MainPageView:
                     mime='text/csv',
                 )
 
+    def _render_realtime_tab(self):
+        RTC_CONFIGURATION = RTCConfiguration(
+            {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+        )
+
+        video_col, metrics_col = st.columns([2, 1])
+
+        with video_col:
+            webrtc_ctx = webrtc_streamer(
+                key="squat-realtime",
+                mode=WebRtcMode.SENDRECV,
+                rtc_configuration=RTC_CONFIGURATION,
+                video_processor_factory=SquatVideoProcessor,
+                media_stream_constraints={"video": True, "audio": False},
+                async_processing=True,
+            )
+
+        # カメラが動作している間、横にステータスを表示し続けるループ
+        with metrics_col:
+            st.markdown("### ステータス")
+            count_placeholder = st.empty()
+            stage_placeholder = st.empty()
+            feedback_placeholder = st.empty()
+            
+            if webrtc_ctx.state.playing:
+                while True:
+                    if webrtc_ctx.video_processor:
+                        # VideoProcessorの属性から現在の値を取得して表示
+                        count_placeholder.metric("スクワット回数", f"{webrtc_ctx.video_processor.current_count} 回")
+                        stage_placeholder.metric("現在の状態", webrtc_ctx.video_processor.current_stage)
+                            
+                        if webrtc_ctx.video_processor.feedback_msg:
+                            feedback_placeholder.warning(f"{webrtc_ctx.video_processor.feedback_msg}")
+                    
+                    time.sleep(0.5)
+
+
 # ==========================================
 # 4. App層（起動）
 # ==========================================
@@ -180,6 +277,7 @@ def get_processor():
 
 class App:
     def __init__(self):
+        st.set_page_config(page_title="筋トレアプリ", layout="wide")
         SessionManager.init_state()
         self.processor = get_processor()
         self.main_page = MainPageView(self.processor)
