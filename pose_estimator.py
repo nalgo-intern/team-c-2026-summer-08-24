@@ -3,10 +3,10 @@ import pandas as pd
 import numpy as np
 import cv2
 import urllib
-from ultralytics import YOLO
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from moviepy import VideoFileClip
 
 class PoseEstimator:
     def __init__(self, model_path='pose_landmarker_lite.task'):
@@ -92,20 +92,21 @@ class PoseEstimator:
 
 
     # 動画から全フレームを処理する
-    def process_video(self, video_path: str, show_video: bool = False):
+    def process_video(self, video_path: str):
+        self.frame_order = 0
+        self.records = []
+
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            return
+            return []
         
         fps = cap.get(cv2.CAP_PROP_FPS)
-        print(fps)
         if fps == 0: fps = 30
         frame_index = 0
 
+        video_landmarks = []
+
         while cap.isOpened():
-            if frame_index % 5 != 0:
-                frame_index += 1
-                continue
             ret, frame = cap.read()
             if not ret:
                 break
@@ -114,21 +115,64 @@ class PoseEstimator:
 
             self.process_frame(frame, timestamp_ms)
 
-            print(timestamp_ms / 1000)
-
-            # デバッグ用 ============================
-            if show_video:
-                frame = self.draw_landmarks(frame)
-                cv2.imshow("test", frame)
-
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-            # =======================================
+            video_landmarks.append(self.current_landmarks)
         
             frame_index += 1
+            
         cap.release()
-        if show_video:
-            cv2.destroyAllWindows()
+        
+        return video_landmarks
+
+    def render_video(self, input_video_path: str, video_landmarks: list, output_video_path: str = "output.mp4"):
+        cap = cv2.VideoCapture(input_video_path)
+        if not cap.isOpened():
+            return
+            
+        # 元動画の情報を取得
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0: fps = 30
+        
+        temp_output = "temp_" + os.path.basename(output_video_path)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+        out = cv2.VideoWriter(temp_output, fourcc, fps, (width, height))
+        
+        frame_index = 0
+        
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            if frame_index < len(video_landmarks):
+                self.current_landmarks = video_landmarks[frame_index]
+                frame = self.draw_landmarks(frame)
+                
+            out.write(frame)
+                
+            frame_index += 1
+            
+        cap.release()
+        out.release()
+        
+        # --- ここから moviepy で H.264 に変換 ---
+        try:
+            # mp4vの動画を読み込み、H.264 (libx264) で書き出し
+            clip = VideoFileClip(temp_output)
+            clip.write_videofile(output_video_path, codec="libx264", audio=False, logger=None)
+            clip.close()
+            
+            # 変換元の一時ファイルを削除
+            if os.path.exists(temp_output):
+                os.remove(temp_output)
+                
+        except Exception as e:
+            print(f"動画の変換に失敗しました: {e}")
+            return temp_output  # 失敗した場合はとりあえずmp4v版を返す
+        
+        # 最終的なH.264の動画パスを返す
+        return output_video_path
 
     # 骨格点を描画する
     def draw_landmarks(self, frame):
