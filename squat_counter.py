@@ -41,7 +41,7 @@ class SquatCounter:
     """膝角度が UP -> DOWN -> UP と変化したときに1回加算する。"""
 
     stand_angle: float = 130.0
-    squat_angle: float = 100.0
+    squat_angle: float = 120.0
     stable_frames: int = 3
     count: int = field(default=0, init=False)
     stage: str = field(default="WAITING", init=False)
