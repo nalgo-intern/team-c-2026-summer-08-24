@@ -1,0 +1,27 @@
+========================================
+最終評価
+========================================
+
+Classification Report
+              precision    recall  f1-score   support
+
+     push_up       0.82      0.67      0.74        42
+       squat       0.60      0.39      0.47        23
+       other       0.61      0.79      0.69        53
+
+    accuracy                           0.67       118
+   macro avg       0.68      0.62      0.63       118
+weighted avg       0.68      0.67      0.66       118
+
+
+Confusion Matrix
+             push_up squat other
+push_up    [28  1 13]
+squat      [ 0  9 14]
+other      [ 6  5 42]
+
+========================================
+学習完了
+========================================
+Best Validation Accuracy: 0.6695
+Model: models\lstm_model_v2.pth

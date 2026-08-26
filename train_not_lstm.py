@@ -1,15 +1,11 @@
-# train.py
+# train_mlp.py
 #
-# LSTMによる3クラス運動分類
+# LSTMなし
+# ピークフレームの7個の角度だけを使った3クラス分類
 #
 # 0 = push_up
 # 1 = squat
 # 2 = other
-#
-# 学習時データ拡張:
-#   0.7～1.3倍のランダム速度変換を
-#   毎回のデータ取得時に適用する
-
 
 import os
 import random
@@ -20,13 +16,9 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-from torch.utils.data import (
-    Dataset,
-    DataLoader
-)
+from torch.utils.data import Dataset, DataLoader
 
 from sklearn.model_selection import GroupShuffleSplit
-
 from sklearn.metrics import (
     classification_report,
     confusion_matrix
@@ -59,16 +51,15 @@ METADATA_PATH = os.path.join(
 # モデル保存先
 # ============================================================
 
-MODEL_DIR = r"models"
+MODEL_DIR = "models"
 
-MODEL_NAME = "lstm_model_v8.pth"
+MODEL_NAME = "mlp_peak_angle.pth"
 
 MODEL_PATH = os.path.join(
     MODEL_DIR,
     MODEL_NAME
 )
 
-# 保存先フォルダを自動作成
 os.makedirs(
     MODEL_DIR,
     exist_ok=True
@@ -85,7 +76,7 @@ BATCH_SIZE = 32
 
 EPOCHS = 100
 
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3
 
 VALIDATION_RATIO = 0.2
 
@@ -93,35 +84,16 @@ NUM_WORKERS = 0
 
 
 # ============================================================
-# データ拡張設定
-# ============================================================
-
-# 速度倍率
-#
-# 0.7 → 遅い動作
-# 1.0 → 元の速度
-# 1.3 → 速い動作
-#
-# 毎回ランダムに0.7～1.3の値を生成する。
-
-SPEED_MIN = 1
-
-SPEED_MAX = 1
-
-
-# ============================================================
-# LSTM設定
+# MLP設定
 # ============================================================
 
 INPUT_SIZE = 7
 
 HIDDEN_SIZE = 64
 
-NUM_LAYERS = 2
+NUM_CLASSES = 3
 
 DROPOUT = 0.3
-
-NUM_CLASSES = 3
 
 
 CLASS_NAMES = [
@@ -172,98 +144,6 @@ if torch.cuda.is_available():
 
 
 # ============================================================
-# 速度データ拡張
-# ============================================================
-
-def speed_augmentation(sequence):
-    """
-    時系列データの動作速度をランダムに変更する。
-
-    Parameters
-    ----------
-    sequence : np.ndarray
-        shape = (sequence_length, input_size)
-
-    Returns
-    -------
-    augmented : np.ndarray
-        元と同じshape
-    """
-
-    seq_len = sequence.shape[0]
-
-    # --------------------------------------------------------
-    # 毎回ランダムに速度倍率を決定
-    # --------------------------------------------------------
-
-    speed = np.random.uniform(
-        SPEED_MIN,
-        SPEED_MAX
-    )
-
-    # --------------------------------------------------------
-    # 元の時間軸
-    # --------------------------------------------------------
-
-    original_time = np.arange(
-        seq_len,
-        dtype=np.float32
-    )
-
-    # --------------------------------------------------------
-    # 中央を基準に時間軸を伸縮
-    # --------------------------------------------------------
-
-    center = (
-        seq_len - 1
-    ) / 2.0
-
-    new_time = (
-        center
-        + (
-            original_time - center
-        ) * speed
-    )
-
-    # --------------------------------------------------------
-    # 範囲外を端のフレームに制限
-    # --------------------------------------------------------
-
-    new_time = np.clip(
-        new_time,
-        0,
-        seq_len - 1
-    )
-
-    # --------------------------------------------------------
-    # 線形補間
-    # --------------------------------------------------------
-
-    augmented = np.zeros_like(
-        sequence,
-        dtype=np.float32
-    )
-
-    for feature_index in range(
-        sequence.shape[1]
-    ):
-
-        augmented[
-            :,
-            feature_index
-        ] = np.interp(
-            new_time,
-            original_time,
-            sequence[
-                :,
-                feature_index
-            ]
-        )
-
-    return augmented
-
-
-# ============================================================
 # Dataset
 # ============================================================
 
@@ -272,135 +152,83 @@ class ExerciseDataset(Dataset):
     def __init__(
         self,
         X,
-        y,
-        training=False
+        y
     ):
 
-        self.X = X
+        self.X = torch.tensor(
+            X,
+            dtype=torch.float32
+        )
 
-        self.y = y
-
-        self.training = training
-
+        self.y = torch.tensor(
+            y,
+            dtype=torch.long
+        )
 
     def __len__(self):
 
         return len(self.X)
-
 
     def __getitem__(
         self,
         index
     ):
 
-        # ----------------------------------------------------
-        # 元データをコピー
-        # ----------------------------------------------------
-
-        sequence = self.X[
-            index
-        ].copy()
-
-        label = self.y[
-            index
-        ]
-
-        # ----------------------------------------------------
-        # 学習時
-        #
-        # 毎回必ず速度拡張する
-        # ----------------------------------------------------
-
-        if self.training:
-
-            sequence = speed_augmentation(
-                sequence
-            )
-
-        # ----------------------------------------------------
-        # Tensor化
-        # ----------------------------------------------------
-
-        sequence = torch.tensor(
-            sequence,
-            dtype=torch.float32
-        )
-
-        label = torch.tensor(
-            label,
-            dtype=torch.long
-        )
-
         return (
-            sequence,
-            label
+            self.X[index],
+            self.y[index]
         )
 
 
 # ============================================================
-# LSTMモデル
+# MLPモデル
 # ============================================================
 
-class LSTMClassifier(nn.Module):
+class MLPClassifier(nn.Module):
 
     def __init__(
         self,
         input_size,
         hidden_size,
-        num_layers,
         num_classes,
         dropout
     ):
 
         super().__init__()
 
-        self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            dropout=(
+        self.network = nn.Sequential(
+
+            nn.Linear(
+                input_size,
+                hidden_size
+            ),
+
+            nn.ReLU(),
+
+            nn.Dropout(
                 dropout
-                if num_layers > 1
-                else 0.0
+            ),
+
+            nn.Linear(
+                hidden_size,
+                hidden_size
+            ),
+
+            nn.ReLU(),
+
+            nn.Dropout(
+                dropout
+            ),
+
+            nn.Linear(
+                hidden_size,
+                num_classes
             )
         )
 
-        self.fc = nn.Linear(
-            hidden_size,
-            num_classes
-        )
-
-
     def forward(self, x):
 
-        # ----------------------------------------------------
-        # x
-        #
-        # (batch, sequence_length, input_size)
-        #
-        # ----------------------------------------------------
-
-        output, (
-            hidden,
-            cell
-        ) = self.lstm(x)
-
-        # ----------------------------------------------------
-        # 最終LSTM層のhidden state
-        # ----------------------------------------------------
-
-        last_hidden = hidden[-1]
-
-        # ----------------------------------------------------
-        # 分類
-        # ----------------------------------------------------
-
-        logits = self.fc(
-            last_hidden
-        )
-
-        return logits
+        return self.network(x)
 
 
 # ============================================================
@@ -490,18 +318,109 @@ if len(X) != len(metadata):
 print("\nクラス分布")
 
 print(
-    metadata[
-        "class"
-    ].value_counts()
+    metadata["class"].value_counts()
 )
 
 
 # ============================================================
-# Train / Validation 分割
+# 1フレームだけ取り出す
+# ============================================================
+
+print("\n========================================")
+print("ピークフレーム抽出")
+print("========================================")
+
+
+# ------------------------------------------------------------
+# X:
 #
-# vid_id単位で分割することで、
-# 同じ動画がTrainとValidationの両方に
-# 入らないようにする。
+# (N, 20, 7)
+#
+# ↓
+#
+# (N, 7)
+#
+# push_up / squat:
+# target_frameに対応するピークフレーム
+#
+# other:
+# 現在の20フレーム系列の先頭フレーム
+# ------------------------------------------------------------
+
+X_peak = np.zeros(
+    (len(X), INPUT_SIZE),
+    dtype=np.float32
+)
+
+
+for i in range(len(X)):
+
+    label = metadata.loc[
+        i,
+        "class"
+    ]
+
+    if label in [
+        "push_up",
+        "squat"
+    ]:
+
+        # ----------------------------------------------------
+        # 現在のXは
+        #
+        # target_frameを最後のフレームとして
+        # 過去20フレームを保存している
+        #
+        # したがってピークフレームは[-1]
+        # ----------------------------------------------------
+
+        X_peak[i] = X[
+            i,
+            -1,
+            :
+        ]
+
+    else:
+
+        # ----------------------------------------------------
+        # other
+        #
+        # 現在は20フレーム系列の先頭を使用
+        # ----------------------------------------------------
+
+        X_peak[i] = X[
+            i,
+            0,
+            :
+        ]
+
+
+print(
+    "X_peak shape:",
+    X_peak.shape
+)
+
+
+# ============================================================
+# NaN / Inf確認
+# ============================================================
+
+if np.isnan(X_peak).any():
+
+    raise ValueError(
+        "X_peakにNaNが含まれています。"
+    )
+
+
+if np.isinf(X_peak).any():
+
+    raise ValueError(
+        "X_peakにInfが含まれています。"
+    )
+
+
+# ============================================================
+# Train / Validation 分割
 # ============================================================
 
 print("\n========================================")
@@ -523,14 +442,14 @@ splitter = GroupShuffleSplit(
 
 train_indices, val_indices = next(
     splitter.split(
-        X,
+        X_peak,
         y,
         groups=groups
     )
 )
 
 
-X_train = X[
+X_train = X_peak[
     train_indices
 ]
 
@@ -539,7 +458,7 @@ y_train = y[
 ]
 
 
-X_val = X[
+X_val = X_peak[
     val_indices
 ]
 
@@ -560,28 +479,84 @@ print(
 
 
 # ============================================================
-# Dataset
+# Train / Validation クラス分布
 # ============================================================
 
-# training=True
-#
-# → 毎回速度拡張
-#
-train_dataset = ExerciseDataset(
-    X_train,
-    y_train,
-    training=True
+print("\nTrain class distribution")
+
+print(
+    pd.Series(y_train).value_counts().sort_index()
 )
 
 
-# training=False
-#
-# → 速度拡張なし
-#
+print("\nValidation class distribution")
+
+print(
+    pd.Series(y_val).value_counts().sort_index()
+)
+
+
+# ============================================================
+# 特徴量の標準化
+# ============================================================
+
+print("\n========================================")
+print("特徴量標準化")
+print("========================================")
+
+
+# ------------------------------------------------------------
+# Trainデータだけから平均・標準偏差を計算
+# ------------------------------------------------------------
+
+mean = X_train.mean(
+    axis=0
+)
+
+std = X_train.std(
+    axis=0
+)
+
+
+# 0除算防止
+
+std[std < 1e-6] = 1.0
+
+
+X_train = (
+    X_train - mean
+) / std
+
+
+X_val = (
+    X_val - mean
+) / std
+
+
+print(
+    "Mean:",
+    mean
+)
+
+print(
+    "Std:",
+    std
+)
+
+
+# ============================================================
+# Dataset
+# ============================================================
+
+train_dataset = ExerciseDataset(
+    X_train,
+    y_train
+)
+
+
 val_dataset = ExerciseDataset(
     X_val,
-    y_val,
-    training=False
+    y_val
 )
 
 
@@ -626,10 +601,6 @@ print(
 )
 
 
-# ------------------------------------------------------------
-# 少ないクラスほど大きい重み
-# ------------------------------------------------------------
-
 class_weights = (
     len(y_train)
     / (
@@ -661,10 +632,9 @@ for i, name in enumerate(
 # モデル
 # ============================================================
 
-model = LSTMClassifier(
+model = MLPClassifier(
     input_size=INPUT_SIZE,
     hidden_size=HIDDEN_SIZE,
-    num_layers=NUM_LAYERS,
     num_classes=NUM_CLASSES,
     dropout=DROPOUT
 ).to(device)
@@ -692,7 +662,8 @@ criterion = nn.CrossEntropyLoss(
 
 optimizer = torch.optim.Adam(
     model.parameters(),
-    lr=LEARNING_RATE
+    lr=LEARNING_RATE,
+    weight_decay=1e-4
 )
 
 
@@ -707,15 +678,8 @@ print("\n========================================")
 print("学習開始")
 print("========================================")
 
-print(
-    f"Speed augmentation: "
-    f"{SPEED_MIN} ～ {SPEED_MAX}"
-)
 
-
-for epoch in range(
-    EPOCHS
-):
+for epoch in range(EPOCHS):
 
     # ========================================================
     # Train
@@ -741,25 +705,13 @@ for epoch in range(
         )
 
 
-        # ----------------------------------------------------
-        # 勾配初期化
-        # ----------------------------------------------------
-
         optimizer.zero_grad()
 
-
-        # ----------------------------------------------------
-        # Forward
-        # ----------------------------------------------------
 
         outputs = model(
             batch_X
         )
 
-
-        # ----------------------------------------------------
-        # Loss
-        # ----------------------------------------------------
 
         loss = criterion(
             outputs,
@@ -767,33 +719,17 @@ for epoch in range(
         )
 
 
-        # ----------------------------------------------------
-        # Backward
-        # ----------------------------------------------------
-
         loss.backward()
 
 
-        # ----------------------------------------------------
-        # パラメータ更新
-        # ----------------------------------------------------
-
         optimizer.step()
 
-
-        # ----------------------------------------------------
-        # Loss
-        # ----------------------------------------------------
 
         train_loss += (
             loss.item()
             * batch_X.size(0)
         )
 
-
-        # ----------------------------------------------------
-        # Accuracy
-        # ----------------------------------------------------
 
         predictions = outputs.argmax(
             dim=1
@@ -850,18 +786,10 @@ for epoch in range(
             )
 
 
-            # ------------------------------------------------
-            # Forward
-            # ------------------------------------------------
-
             outputs = model(
                 batch_X
             )
 
-
-            # ------------------------------------------------
-            # Loss
-            # ------------------------------------------------
 
             loss = criterion(
                 outputs,
@@ -874,10 +802,6 @@ for epoch in range(
                 * batch_X.size(0)
             )
 
-
-            # ------------------------------------------------
-            # Prediction
-            # ------------------------------------------------
 
             predictions = outputs.argmax(
                 dim=1
@@ -914,7 +838,7 @@ for epoch in range(
 
 
     # ========================================================
-    # 結果表示
+    # 表示
     # ========================================================
 
     print(
@@ -951,9 +875,6 @@ for epoch in range(
                 "hidden_size":
                     HIDDEN_SIZE,
 
-                "num_layers":
-                    NUM_LAYERS,
-
                 "num_classes":
                     NUM_CLASSES,
 
@@ -961,7 +882,14 @@ for epoch in range(
                     DROPOUT,
 
                 "class_names":
-                    CLASS_NAMES
+                    CLASS_NAMES,
+
+                # 標準化に必要
+                "mean":
+                    mean,
+
+                "std":
+                    std
             },
             MODEL_PATH
         )
@@ -983,10 +911,6 @@ print("最終評価")
 print("========================================")
 
 
-# ------------------------------------------------------------
-# ベストモデル読み込み
-# ------------------------------------------------------------
-
 checkpoint = torch.load(
     MODEL_PATH,
     map_location=device
@@ -1002,10 +926,6 @@ model.load_state_dict(
 
 model.eval()
 
-
-# ------------------------------------------------------------
-# Validation予測
-# ------------------------------------------------------------
 
 all_predictions = []
 

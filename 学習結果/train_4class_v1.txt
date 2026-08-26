@@ -1,0 +1,58 @@
+========================================
+Accuracy
+========================================
+Train Accuracy: 1.0000
+Validation Accuracy: 0.7184
+
+========================================
+Classification Report
+========================================
+              precision    recall  f1-score   support
+
+push_up_down       0.54      0.70      0.61        20
+  push_up_up       0.88      0.72      0.79        29
+  squat_down       0.81      0.96      0.88        26
+    squat_up       0.64      0.50      0.56        28
+
+    accuracy                           0.72       103
+   macro avg       0.71      0.72      0.71       103
+weighted avg       0.73      0.72      0.71       103
+
+
+========================================
+Confusion Matrix
+========================================
+              push_up_down  push_up_up  squat_down  squat_up
+push_up_down            14           0           2         4
+push_up_up               4          21           1         3
+squat_down               0           0          25         1
+squat_up                 8           3           3        14
+
+========================================
+Feature Importance
+========================================
+                               feature  importance
+      right_hip_right_knee_right_ankle    0.217405
+         left_hip_left_knee_left_ankle    0.202061
+          right_knee_mid_hip_left_knee    0.124441
+right_wrist_right_elbow_right_shoulder    0.119339
+  right_elbow_right_shoulder_right_hip    0.119041
+   left_wrist_left_elbow_left_shoulder    0.111804
+     left_elbow_left_shoulder_left_hip    0.105908
+
+========================================
+モデル保存
+========================================
+Model: models\random_forest_4class.pkl
+
+========================================
+学習完了
+========================================
+Train Accuracy: 1.0000
+Validation Accuracy: 0.7184
+
+4クラス:
+  - squat_down
+  - squat_up
+  - push_up_down
+  - push_up_up
