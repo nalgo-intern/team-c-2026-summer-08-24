@@ -9,7 +9,7 @@ from mediapipe.tasks.python import vision
 from moviepy import VideoFileClip
 
 class PoseEstimator:
-    def __init__(self, model_path='pose_landmarker_lite.task'):
+    def __init__(self, model_path=r"pose_landmarker_lite.task"):
         
         if not os.path.exists(model_path):
             url = f"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
