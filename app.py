@@ -27,22 +27,28 @@ class VideoProcessor:
         # 2. 推論を実行して骨格情報(ランドマーク)を取得
         landmarks_data = self.estimator.process_video(input_temp.name)
 
-        # 3. 描画済み動画を保存するための一時ファイルを作成
-        output_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-        output_temp.close()
-
-        # 4. 取得したランドマークを使って、描画済みの動画を生成
-        out_path = self.estimator.render_video(input_temp.name, landmarks_data, output_temp.name)
-
-        # 5. 角度データの取得
+        # ===== 変更箇所: 動画をレンダリングする前に回数をカウントする =====
+        # 3. 角度データの取得
         df_angles = self.estimator.get_dataframe()
 
         counter = SquatCounter()
+        frame_counts = [] # 各フレームのカウント数を保存するリスト
 
         for record in self.estimator.records:
             counter.update_from_pose_angles(record)
+            frame_counts.append(counter.count) # そのフレーム時点での回数を保存
 
         squat_count = counter.count
+        # =========================================================
+
+        # 4. 描画済み動画を保存するための一時ファイルを作成
+        output_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+        output_temp.close()
+
+        # 5. 取得したランドマークと回数リストを使って、描画済みの動画を生成
+        # render_video に frame_counts を渡すように変更
+        out_path = self.estimator.render_video(input_temp.name, landmarks_data, frame_counts, output_temp.name)
+
 
         # ※ 使い終わった入力用の一時ファイルは削除してもOK
         os.remove(input_temp.name)

@@ -3,13 +3,13 @@ import pandas as pd
 import numpy as np
 import cv2
 import urllib
-from ultralytics import YOLO
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from moviepy import VideoFileClip
 
 class PoseEstimator:
-    def __init__(self, model_path='pose_landmarker_lite.task'):
+    def __init__(self, model_path=r"pose_landmarker_lite.task"):
         
         if not os.path.exists(model_path):
             url = f"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
@@ -92,20 +92,21 @@ class PoseEstimator:
 
 
     # 動画から全フレームを処理する
-    def process_video(self, video_path: str, show_video: bool = False):
+    def process_video(self, video_path: str):
+        self.frame_order = 0
+        self.records = []
+
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            return
+            return []
         
         fps = cap.get(cv2.CAP_PROP_FPS)
-        print(fps)
         if fps == 0: fps = 30
         frame_index = 0
 
+        video_landmarks = []
+
         while cap.isOpened():
-            if frame_index % 5 != 0:
-                frame_index += 1
-                continue
             ret, frame = cap.read()
             if not ret:
                 break
@@ -114,35 +115,80 @@ class PoseEstimator:
 
             self.process_frame(frame, timestamp_ms)
 
-            print(timestamp_ms / 1000)
+            video_landmarks.append(self.current_landmarks)
+        
+            frame_index += 1
+            
+        cap.release()
+        
+        return video_landmarks
 
-            # デバッグ用 ============================
-            if show_video:
+    def render_video(self, input_video_path: str, video_landmarks: list, frame_counts: list, output_video_path: str = "output.mp4"):
+        cap = cv2.VideoCapture(input_video_path)
+        if not cap.isOpened():
+            return
+            
+        # 元動画の情報を取得
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0: fps = 30
+        
+        temp_output = "temp_" + os.path.basename(output_video_path)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+        out = cv2.VideoWriter(temp_output, fourcc, fps, (width, height))
+        
+        frame_index = 0
+        
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            if frame_index < len(video_landmarks):
+                self.current_landmarks = video_landmarks[frame_index]
                 frame = self.draw_landmarks(frame)
-            # ==========================================
-                if frame_index < len(self.records):
-                    record = self.records[frame_index]
-                    
-                    # 左右の膝の角度を取得 (取得できない場合は0.0にする)
-                    l_knee = record.get('left_hip_left_knee_left_ankle', 0.0)
-                    r_knee = record.get('right_hip_right_knee_right_ankle', 0.0)
-                    avg_knee = (l_knee + r_knee) / 2.0
-                    
-                    # OpenCVで画面の左上にテキストを描画 (黄色とピンク)
-                    cv2.putText(frame, f"L Knee: {l_knee:.1f}", (10, 40), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2, cv2.LINE_AA)
-                    cv2.putText(frame, f"R Knee: {r_knee:.1f}", (10, 80), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2, cv2.LINE_AA)
-                    cv2.putText(frame, f"Avg Knee: {avg_knee:.1f}", (10, 120), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 255), 2, cv2.LINE_AA)
-                # ==========================================
                 
+                # ===== 変更箇所: テキストの描画処理を追加 =====
+                # そのフレームの記録と回数を取得
+                record = self.records[frame_index]
+                count = frame_counts[frame_index]
+                
+                # 膝の角度を取得 (取得できない場合は0.0にする)
+                l_knee_angle = record.get('left_hip_left_knee_left_ankle', 0.0)
+                r_knee_angle = record.get('right_hip_right_knee_right_ankle', 0.0)
+                
+                # 動画の左上にテキストを描画
+                # cv2.putText(画像, テキスト, 位置(x,y), フォント, サイズ, 色(B,G,R), 太さ)
+                cv2.putText(frame, f"Count: {count}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+                cv2.putText(frame, f"L-Knee: {l_knee_angle:.1f}", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+                cv2.putText(frame, f"R-Knee: {r_knee_angle:.1f}", (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+                # ===============================================
+
             out.write(frame)
                 
             frame_index += 1
+            
         cap.release()
-        if show_video:
-            cv2.destroyAllWindows()
+        out.release()
+        
+        # --- ここから moviepy で H.264 に変換 ---
+        try:
+            # mp4vの動画を読み込み、H.264 (libx264) で書き出し
+            clip = VideoFileClip(temp_output)
+            clip.write_videofile(output_video_path, codec="libx264", audio=False, logger=None)
+            clip.close()
+            
+            # 変換元の一時ファイルを削除
+            if os.path.exists(temp_output):
+                os.remove(temp_output)
+                
+        except Exception as e:
+            print(f"動画の変換に失敗しました: {e}")
+            return temp_output  # 失敗した場合はとりあえずmp4v版を返す
+        
+        # 最終的なH.264の動画パスを返す
+        return output_video_path
 
     # 骨格点を描画する
     def draw_landmarks(self, frame):
