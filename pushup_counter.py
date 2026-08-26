@@ -42,7 +42,7 @@ class PushupCounter:
 
     extended_angle: float = 150.0
     bent_angle: float = 90.0
-    stable_frames: int = 3
+    stable_frames: int = 5
     count: int = field(default=0, init=False)
     stage: str = field(default="WAITING", init=False)
     _candidate: str | None = field(default=None, init=False, repr=False)
