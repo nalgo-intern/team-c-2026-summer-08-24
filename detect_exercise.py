@@ -99,7 +99,7 @@ CLASS_NAMES = [
 #
 # ============================================================
 
-PUSHUP_CONFIDENCE_THRESHOLD = 0.90
+PUSHUP_CONFIDENCE_THRESHOLD = 0.9
 
 SQUAT_CONFIDENCE_THRESHOLD = 0.1
 
