@@ -3,7 +3,7 @@ import subprocess
 import imageio_ffmpeg
 
 INPUT_DIR = Path("input")
-OUTPUT_DIR = Path("input_video")
+OUTPUT_DIR = Path("input_videos")
 
 OUTPUT_DIR.mkdir(exist_ok=True)
 

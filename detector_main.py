@@ -30,7 +30,7 @@ detector = ExerciseDetector(
 
 
 results = detector.process_video(
-    video_path=(r"C:\dev\git\test_nalgo_intern_teamc.mp4"
+    video_path=(r"C:\dev\git\team-c-2026-summer-08-24\input_video\IMG_6477.mp4"
         
     ),
 
