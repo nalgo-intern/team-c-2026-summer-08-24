@@ -34,7 +34,7 @@
 streamlit run app.py
 ```
 
-コマンドを実行し、(http://localhost:8501)にアクセスします。
+コマンドを実行し、(http://localhost:8501) にアクセスします。
 ## 機能・使い方
 
 - **動画タブ**
