@@ -49,6 +49,8 @@ class VideoProcessor:
         pushup_eval = PushupEvaluator()
 
         frame_index = 0
+        last_valid_ex_code = 0
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -57,8 +59,13 @@ class VideoProcessor:
             timestamp_ms = (frame_index / fps) * 1000.0
             current_second = frame_index / fps
             
-            # self.detector ではなく detector を使用する
             ex_code = detector.process_frame(frame, timestamp_ms)
+            
+            if ex_code in (1, 2):
+                last_valid_ex_code = ex_code
+            else:
+                ex_code = last_valid_ex_code
+
             landmarks = detector.pose_estimator.current_landmarks
             angles = detector.pose_estimator.records[-1] if detector.pose_estimator.records else {}
             
@@ -138,7 +145,9 @@ class RealtimeVideoProcessor:
         self.current_count = 0
         self.current_stage = "WAITING"
         self.feedback_msg = None
-
+        
+        self.last_valid_ex_code = 0 
+        
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         img = cv2.flip(img, 1)
@@ -148,6 +157,12 @@ class RealtimeVideoProcessor:
         timestamp_ms = int(elapsed_seconds * 1000)
 
         ex_code = self.detector.process_frame(img, timestamp_ms)
+
+        if ex_code in (1, 2):
+            self.last_valid_ex_code = ex_code
+        else:
+            ex_code = self.last_valid_ex_code
+
         landmarks = self.detector.pose_estimator.current_landmarks
         angles = self.detector.pose_estimator.records[-1] if self.detector.pose_estimator.records else {}
 

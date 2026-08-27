@@ -59,8 +59,8 @@ class ExerciseDetector:
         self,
         model_path,
         pose_model_path,
-        pushup_threshold=0.90,
-        squat_threshold=0.80,
+        pushup_threshold=0.8,
+        squat_threshold=0.2,
         required_consecutive=3,
         sequence_length=20,
     ):

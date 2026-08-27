@@ -18,10 +18,10 @@ detector = ExerciseDetector(
     ),
 
     # 腕立て
-    pushup_threshold=0.90,
+    pushup_threshold=0.8,
 
     # スクワット
-    squat_threshold=0.80,
+    squat_threshold=0.2,
 
     required_consecutive=3,
 
@@ -30,10 +30,8 @@ detector = ExerciseDetector(
 
 
 results = detector.process_video(
-    video_path=(
-        BASE_DIR
-        / "input_video"
-        / "IMG_6477.mp4"
+    video_path=(r"C:\dev\git\team-c-2026-summer-08-24\input_video\IMG_6477.mp4"
+        
     ),
 
     output_path=(
