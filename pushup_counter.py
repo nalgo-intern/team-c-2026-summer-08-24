@@ -41,7 +41,7 @@ class PushupCounter:
     """両肘が UP -> DOWN -> UP と変化したときに1回加算する。"""
 
     extended_angle: float = 120.0
-    bent_angle: float = 90.0
+    bent_angle: float = 110.0
     stable_frames: int = 5
     count: int = field(default=0, init=False)
     stage: str = field(default="WAITING", init=False)
